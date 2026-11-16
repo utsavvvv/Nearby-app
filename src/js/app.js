@@ -618,14 +618,23 @@ function showPro(reason) {
 async function buyPro() {
   if (!pro.canBuyHere) { openExternal(PLAY_STORE_URL); return; }
   if (!navigator.onLine) { toast('Buying needs internet'); return; }
+  // Google Play only sells Pro once the product exists in Play Console and the app was
+  // installed from Play. Without that there's no price; explain instead of showing an error.
+  if (!pro.price) await pro.loadPrice();
+  if (!pro.price) { showProUnavailable(); return; }
   try {
     const result = await pro.buy();
     if (result === 'active') toast('⭐ Pro unlocked. Thank you!');
     else if (result === 'pending') toast('Payment pending. Pro unlocks when Google Play confirms it.', 5000);
   } catch (err) {
-    toast(`Purchase failed: ${err.message || err}`);
+    if (/product|not found|unavailable|billing|item/i.test(err?.message || String(err))) showProUnavailable();
+    else toast(`Purchase failed: ${err.message || err}`);
   }
   renderPro();
+}
+
+function showProUnavailable() {
+  toast('Pro can only be bought in the app installed from Google Play. If you got the app from Play, try again later.', 6000);
 }
 
 async function restorePro() {

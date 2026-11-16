@@ -280,3 +280,27 @@ test('Android app: buying Pro through Google Play unlocks it', async ({ page }) 
   await page.reload();
   await expect(page.locator('#proBadge')).toBeVisible();
 });
+
+test('Android app without a Play product explains instead of erroring', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        App: { addListener() {} },
+        NativePurchases: {
+          async getPurchases() { return { purchases: [] }; },
+          async getProducts() { throw new Error('No product found'); },
+          async purchaseProduct() { window.__bought = true; throw new Error('No product found'); },
+          async restorePurchases() {},
+        },
+      },
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.locator('#radius').selectOption('10000');
+  await page.locator('#proDialogBuy').click();
+  await expect(page.locator('#toast')).toContainText('installed from Google Play');
+  await expect(page.locator('#toast')).not.toContainText('No product found');
+  expect(await page.evaluate(() => window.__bought)).toBeUndefined();
+});
