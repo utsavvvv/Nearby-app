@@ -1,5 +1,5 @@
 // Builds the deployable app into dist/:
-//  - copies src/ and the Leaflet library
+//  - copies src/ and the MapLibre map library
 //  - writes a service worker whose cache name is a content hash, so every
 //    release invalidates old caches and users get the update.
 import { createHash } from 'node:crypto';
@@ -20,10 +20,11 @@ await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 await cp(src, out, { recursive: true, filter: (p) => !p.endsWith(`${sep}sw.js`) });
 
-const leaflet = join(root, 'node_modules', 'leaflet', 'dist');
-await mkdir(join(out, 'vendor', 'leaflet'), { recursive: true });
-for (const f of ['leaflet.js', 'leaflet.css']) await cp(join(leaflet, f), join(out, 'vendor', 'leaflet', f));
-await cp(join(leaflet, 'images'), join(out, 'vendor', 'leaflet', 'images'), { recursive: true });
+// MapLibre GL (map renderer). The main module loads its worker from the same folder.
+const maplibre = join(root, 'node_modules', 'maplibre-gl', 'dist');
+await mkdir(join(out, 'vendor', 'maplibre'), { recursive: true });
+for (const f of ['maplibre-gl.mjs', 'maplibre-gl-worker.mjs', 'maplibre-gl.css']) await cp(join(maplibre, f), join(out, 'vendor', 'maplibre', f));
+await cp(join(root, 'node_modules', 'maplibre-gl', 'LICENSE.txt'), join(out, 'vendor', 'maplibre', 'LICENSE.txt'));
 
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -33,13 +34,13 @@ async function walk(dir) {
 
 // Stamp the app version and (web only) a Content-Security-Policy into the HTML.
 const origin = (u) => new URL(u.replace(/[{}]/g, '')).origin;
-const tileOrigin = origin(config.TILE_URL);
+const mapOrigin = origin(config.MAP_STYLE_URL);
 const csp = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: ${tileOrigin}`,
-  `connect-src 'self' ${[...new Set([...config.OVERPASS_ENDPOINTS.map(origin), origin(config.NOMINATIM_URL), tileOrigin])].join(' ')}`,
+  "img-src 'self' data: blob:",
+  `connect-src 'self' ${[...new Set([...config.OVERPASS_ENDPOINTS.map(origin), origin(config.NOMINATIM_URL), mapOrigin])].join(' ')}`,
   "worker-src 'self'",
   "manifest-src 'self'",
   "object-src 'none'",

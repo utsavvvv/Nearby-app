@@ -15,12 +15,35 @@ const ELEMENTS = [
 
 test.use({ geolocation: HOME, permissions: ['geolocation'] });
 
+// A tiny stand-in for the OpenFreeMap style, tile index and tiles.
+const MAP_STYLE = {
+  version: 8,
+  sources: { openmaptiles: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' } },
+  layers: [
+    { id: 'background', type: 'background', paint: { 'background-color': '#f2efe9' } },
+    { id: 'water', type: 'fill', source: 'openmaptiles', 'source-layer': 'water', paint: { 'fill-color': '#9ec7f3' } },
+  ],
+};
+const TILEJSON = { tilejson: '3.0.0', tiles: ['https://tiles.openfreemap.org/planet/20261110_001001_pt/{z}/{x}/{y}.pbf'], minzoom: 0, maxzoom: 14 };
+
+async function mockMap(context) {
+  const seen = [];
+  await context.route(/tiles\.openfreemap\.org/, (r) => {
+    const url = r.request().url();
+    seen.push(url);
+    if (url.endsWith('/styles/liberty')) return r.fulfill({ json: MAP_STYLE });
+    if (url.endsWith('/planet')) return r.fulfill({ json: TILEJSON });
+    return r.fulfill({ status: 200, contentType: 'application/x-protobuf', body: Buffer.alloc(0) });
+  });
+  return seen;
+}
+
 test.beforeEach(async ({ context }) => {
   // Never hit real servers in tests.
   await context.route(/\/api\/interpreter$/, (r) => r.fulfill({ json: { elements: ELEMENTS } }));
   await context.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: { address: { suburb: 'Godowlia' } } }));
   await context.route(/nominatim\.openstreetmap\.org\/search/, (r) => r.fulfill({ json: [{ lat: '25.3176', lon: '82.9739', name: 'Varanasi', display_name: 'Varanasi, Uttar Pradesh, India' }] }));
-  await context.route(/tile\.openstreetmap\.org/, (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.alloc(0) }));
+  await mockMap(context);
 });
 
 async function saveArea(page) {
@@ -72,6 +95,39 @@ test('works fully offline after the first visit', async ({ page, context }) => {
 
   await page.getByRole('button', { name: 'Map' }).click();
   await expect(page.locator('.pin').first()).toBeVisible();
+  await expect(page.locator('.map-fallback')).toHaveCount(0);
+});
+
+test('map shows places and keeps map data for offline use', async ({ page, context }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await saveArea(page);
+  await page.getByRole('button', { name: 'Map' }).click();
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  // Street zoom: only places in view get markers.
+  await expect(page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]')).toBeVisible();
+  await expect(page.locator('.pin-btn[aria-label="SBI ATM"]')).toHaveCount(0);
+  await expect(page.locator('.me-dot')).toBeVisible();
+
+  // Map files are cached, with the weekly version stripped from tile keys.
+  await expect.poll(async () => page.evaluate(async () => (await (await caches.open('nearby-map')).keys()).map((r) => r.url)))
+    .toEqual(expect.arrayContaining(['https://tiles.openfreemap.org/styles/liberty', expect.stringMatching(/\/planet\/\d+\/\d+\/\d+\.pbf$/)]));
+
+  // Tapping a marker shows its details.
+  await page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]').click();
+  await expect(page.locator('.maplibregl-popup')).toContainText('Open now');
+
+  // Offline: the map still loads from the cache.
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await context.unroute(/tiles\.openfreemap\.org/);
+  await context.route(/tiles\.openfreemap\.org/, (r) => r.abort('internetdisconnected'));
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Map' }).click();
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  await expect(page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.querySelector('.maplibregl-canvas')?.width > 0)).toBe(true);
+  expect(errors).toEqual([]);
 });
 
 test('export and import round-trip', async ({ page }) => {

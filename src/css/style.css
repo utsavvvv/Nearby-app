@@ -169,13 +169,18 @@ fieldset.field label { color: var(--text); display: flex; gap: .4rem; align-item
   position: absolute; left: 50%; top: calc((100% - var(--tabs-h)) / 2); transform: translate(-50%, -50%);
   z-index: 450; pointer-events: none; font-size: 1.6rem; color: var(--accent); font-weight: 300; opacity: .8;
 }
+.pin-btn { border: 0; background: none; padding: 0 0 4px; cursor: pointer; }
+/* The marker element itself is positioned by MapLibre with `transform`, so only the inner shape is rotated. */
 .pin {
-  width: 30px; height: 30px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
-  display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: 50% 50% 50% 0; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  transform: rotate(-45deg);
 }
-.pin span { transform: rotate(45deg); font-size: 15px; }
+.pin > span { transform: rotate(45deg); font-size: 15px; line-height: 1; }
+.maplibregl-popup-content { font-family: inherit; font-size: .9rem; color: #13201d; border-radius: 12px; padding: 10px 28px 10px 12px; }
+.maplibregl-popup-close-button { font-size: 1.2rem; width: 26px; height: 26px; }
+.map-fallback { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--muted); margin: 0; }
 .me-dot { width: 18px; height: 18px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(26,115,232,.25); }
-.leaflet-popup-content { font-family: inherit; }
 
 /* FAB & tabs */
 .fab {

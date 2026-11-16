@@ -21,7 +21,7 @@ There's no server, no account and no tracking. Everything is stored on the phone
 | Category filters & search | No |
 | Add your own places (e.g. an unmapped pan shop) | No |
 | Export / import places as a file (backup, share with friends) | No |
-| Map with markers | Map pictures you've viewed online are cached |
+| Street map with markers (OpenFreeMap) | Areas you've viewed online are cached for offline use |
 | Directions | Hands off to the phone's maps app |
 | App updates | Web: shows "A new version is ready" → *Update* |
 
@@ -55,7 +55,7 @@ src/
     overpass.js     downloads places (timeouts, fallback servers, cancel)
     db.js           IndexedDB storage
     hours.js        opening_hours parser ("Open now")
-    tiles.js        map tile layer that caches tiles for offline use
+    map.js          street map (MapLibre + OpenFreeMap) with offline caching
     model.js        validation of imported data
     platform.js     web vs Android differences (links, file export)
     geo.js          distance / bearing helpers
@@ -78,7 +78,7 @@ To change the app icon, edit `src/icons/icon.svg` and run `node scripts/android-
 
 ## Before going live
 
-1. In `src/js/config.js`, set `SUPPORT_URL`. If you expect lots of users, set `TILE_URL` to a commercial tile provider. OpenStreetMap's free tile server only allows light use.
+1. In `src/js/config.js`, set `SUPPORT_URL`. The map uses [OpenFreeMap](https://openfreemap.org), which is free with no API key and allows commercial use. To use another provider, change `MAP_STYLE_URL` and `MAP_HOST` (any MapLibre style works, e.g. MapTiler or Stadia with your key).
 2. In `src/privacy.html`, check the contact details.
 3. In `capacitor.config.json` and `android/app/build.gradle`, set the app ID (`app.nearbyoffline.travel`) to one you own. **It can't change after you publish to Play.**
 4. Choose a license (currently `UNLICENSED`, meaning all rights reserved).
@@ -86,4 +86,4 @@ To change the app icon, edit `src/icons/icon.svg` and run `node scripts/android-
 
 ## Data & credits
 
-Place data and map tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL. Downloads use the public [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), and town search uses [Nominatim](https://nominatim.org/). The map uses [Leaflet](https://leafletjs.com/) (BSD-2-Clause).
+Place data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL. Downloads use the public [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), and town search uses [Nominatim](https://nominatim.org/). The street map is from [OpenFreeMap](https://openfreemap.org) / [OpenMapTiles](https://openmaptiles.org/), drawn with [MapLibre GL JS](https://maplibre.org/) (BSD-3-Clause).

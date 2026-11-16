@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- New street map: OpenFreeMap vector map drawn with MapLibre (no API key). Fixes the
+  "Access blocked" map in the Android app, which came from OpenStreetMap's tile-server policy.
+- Map data you view is cached for offline use, including in the Android app.
+- Falls back to a clear message if the device can't draw the map; the list keeps working.
+
 ## 1.0.0
 
 First production release.

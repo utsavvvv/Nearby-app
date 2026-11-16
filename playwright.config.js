@@ -11,7 +11,14 @@ export default defineConfig({
     trace: 'off',
     serviceWorkers: 'allow',
   },
-  projects: [{ name: 'mobile-chrome', use: { ...devices['Pixel 7'] } }],
+  projects: [{
+    name: 'mobile-chrome',
+    use: {
+      ...devices['Pixel 7'],
+      // Software WebGL so the MapLibre map can render in headless Chromium.
+      launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
+    },
+  }],
   webServer: {
     command: 'node scripts/serve.mjs dist 4173',
     url: 'http://localhost:4173',

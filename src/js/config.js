@@ -5,13 +5,12 @@ export const APP_NAME = 'Nearby Offline';
 // Where users can report problems (shown in the app's About section).
 export const SUPPORT_URL = 'https://github.com/utsavvvv/Nearby-app/issues';
 
-// Map tiles. The public OpenStreetMap server is fine for light use, but its policy
-// (https://operations.osmfoundation.org/policies/tiles/) does not allow heavy traffic or bulk
-// downloading. If the app gets popular, switch to a commercial tile provider here.
-export const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-export const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-export const TILE_MAX_ZOOM = 19;
-export const MAX_CACHED_TILES = 4000; // roughly 60-100 MB
+// The street map. OpenFreeMap (https://openfreemap.org) is free, needs no API key, allows
+// commercial use and allows keeping viewed map data for offline use. Other styles:
+// .../styles/bright, .../styles/positron. Any MapLibre style URL works if you change MAP_HOST too.
+export const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+export const MAP_HOST = 'tiles.openfreemap.org';
+export const MAX_CACHED_MAP_FILES = 8000; // vector tiles are small: roughly 100-200 MB at most
 
 // Servers that answer place-data queries. Tried in order until one works.
 export const OVERPASS_ENDPOINTS = [

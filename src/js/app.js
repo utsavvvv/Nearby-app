@@ -1,15 +1,13 @@
-/* global L */
 import { CATEGORIES, CATEGORY_BY_ID } from './categories.js';
 import { distance, bearing, compassPoint, formatDistance, walkTime } from './geo.js';
 import * as db from './db.js';
 import { fetchPlaces } from './overpass.js';
 import { isOpenAt } from './hours.js';
 import { sanitizePlace, sanitizeRegion } from './model.js';
-import { cachedTileLayer, cachedTileCount, clearTiles } from './tiles.js';
+import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache } from './map.js';
 import { isNative, openExternal, saveTextFile } from './platform.js';
 import {
   DEFAULT_CENTER, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
-  TILE_ATTRIBUTION, TILE_MAX_ZOOM, TILE_URL,
 } from './config.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -290,49 +288,54 @@ function render() {
 }
 
 // ---------- map ----------
-let map; let markerLayer; let meMarker; let accCircle;
+let map = null; // PlaceMap, created the first time it's needed
+let mapFailed = false;
 function initMap() {
-  if (map) return;
+  if (map || mapFailed) return map;
   const start = state.pos ? [state.pos.lat, state.pos.lon] : (state.regions[0] ? [state.regions[0].lat, state.regions[0].lon] : DEFAULT_CENTER);
-  map = L.map('map', { zoomControl: true }).setView(start, state.pos ? 16 : 13);
-  cachedTileLayer(TILE_URL, { maxZoom: TILE_MAX_ZOOM, attribution: TILE_ATTRIBUTION }).addTo(map);
-  markerLayer = L.layerGroup().addTo(map);
-  map.on('moveend', renderMarkers);
-  updateMeMarker();
+  try {
+    if (!webglSupported()) throw new Error('WebGL not available');
+    map = new PlaceMap($('#map'), { center: start, zoom: state.pos ? 16 : 13 });
+    map.on('moveend', renderMarkers);
+    map.on('error', (e) => console.warn('map:', e.error?.message || e));
+    updateMeMarker();
+  } catch (err) {
+    console.error(err);
+    mapFailed = true;
+    $('#map').innerHTML = '<p class="map-fallback">The map cannot be shown on this device. The Nearby list, distances and compass still work.</p>';
+  }
+  return map;
+}
+
+/** Map centre, or the user's position if the map is unavailable. */
+function mapCenter() {
+  if (initMap()) return map.getCenter();
+  return state.pos ? { lat: state.pos.lat, lon: state.pos.lon } : null;
 }
 
 function updateMeMarker() {
   if (!map || !state.pos) return;
-  const ll = [state.pos.lat, state.pos.lon];
-  const radius = state.pos.manual ? 0 : state.pos.acc || 0;
-  if (!meMarker) {
-    meMarker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18] }), zIndexOffset: 1000, title: 'You are here', keyboard: false }).addTo(map);
-    accCircle = L.circle(ll, { radius, weight: 1, fillOpacity: 0.08, interactive: false }).addTo(map);
-  } else {
-    meMarker.setLatLng(ll);
-    accCircle.setLatLng(ll).setRadius(radius);
-  }
+  map.setMe(state.pos.lat, state.pos.lon, state.pos.manual ? 0 : state.pos.acc || 0);
 }
 
 function renderMarkers() {
   if (!map) return;
-  markerLayer.clearLayers();
   const c = map.getCenter();
-  const bounds = map.getBounds().pad(0.2);
   const items = filteredPlaces()
-    .filter((p) => bounds.contains([p.lat, p.lon]))
-    .map((p) => ({ p, dc: distance(c.lat, c.lng, p.lat, p.lon) }))
+    .filter((p) => map.contains(p.lat, p.lon))
+    .map((p) => ({ p, dc: distance(c.lat, c.lon, p.lat, p.lon) }))
     .sort((a, b) => a.dc - b.dc)
-    .slice(0, MAX_MARKERS);
-  for (const { p } of items) {
-    const cat = CATEGORY_BY_ID[p.cat];
-    const icon = L.divIcon({ className: '', html: `<div class="pin" style="background:${cat.color}"><span>${cat.icon}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] });
-    const dist = p.d != null ? `<br>${formatDistance(p.d)} ${compassPoint(p.b)}` : '';
-    const open = p.open === true ? '<br><span class="badge open">Open now</span>' : p.open === false ? '<br><span class="badge closed">Closed</span>' : '';
-    L.marker([p.lat, p.lon], { icon, title: displayName(p) })
-      .bindPopup(`<b>${esc(displayName(p))}</b><br>${esc(cat.label)}${open}${p.hours ? `<br>🕒 ${esc(p.hours)}` : ''}${p.note ? `<br>📝 ${esc(p.note)}` : ''}${dist}`)
-      .addTo(markerLayer);
-  }
+    .slice(0, MAX_MARKERS)
+    .map(({ p }) => {
+      const cat = CATEGORY_BY_ID[p.cat];
+      const dist = p.d != null ? `<br>${formatDistance(p.d)} ${compassPoint(p.b)}` : '';
+      const open = p.open === true ? '<br><span class="badge open">Open now</span>' : p.open === false ? '<br><span class="badge closed">Closed</span>' : '';
+      return {
+        lat: p.lat, lon: p.lon, color: cat.color, icon: cat.icon, title: displayName(p),
+        popupHtml: `<b>${esc(displayName(p))}</b><br>${esc(cat.label)}${open}${p.hours ? `<br>🕒 ${esc(p.hours)}` : ''}${p.note ? `<br>📝 ${esc(p.note)}` : ''}${dist}`,
+      };
+    });
+  map.setMarkers(items);
 }
 
 function showView(view) {
@@ -346,8 +349,7 @@ function showView(view) {
   $('#chips').hidden = view === 'areas';
   $('#addBtn').hidden = view === 'areas';
   if (view === 'map') {
-    initMap();
-    setTimeout(() => { map.invalidateSize(); renderMarkers(); }, 0);
+    if (initMap()) setTimeout(() => { map.resize(); renderMarkers(); }, 0);
   }
   if (view === 'areas') renderRegions();
 }
@@ -407,10 +409,10 @@ async function downloadAroundMe() {
 }
 
 async function downloadAroundMap() {
-  initMap();
-  const c = map.getCenter();
-  const label = await reverseLabel(c.lat, c.lng);
-  downloadArea(c.lat, c.lng, label);
+  const c = mapCenter();
+  if (!c) { toast('Map not available. Use “Around me” instead.'); return; }
+  const label = await reverseLabel(c.lat, c.lon);
+  downloadArea(c.lat, c.lon, label);
 }
 
 async function searchTown(e) {
@@ -444,12 +446,12 @@ async function renderRegions() {
         </div></li>`).join('')
     : '<li class="muted">No areas saved yet.</li>';
   if (userCount) ul.insertAdjacentHTML('beforeend', `<li><div><div class="r-name">Added by you</div><div class="muted small">${userCount} places</div></div></li>`);
-  const tiles = await cachedTileCount();
+  const tiles = await cachedMapFileCount();
   let usage = '';
   try {
     if (navigator.storage?.estimate) usage = ` Storage used: about ${((await navigator.storage.estimate()).usage / 1048576).toFixed(1)} MB.`;
   } catch { /* ignore */ }
-  $('#storage').textContent = `${tiles} map tiles saved for offline viewing.${usage}`;
+  $('#storage').textContent = `${tiles} map files saved for offline viewing.${usage}`;
 }
 
 // ---------- add / delete user places ----------
@@ -464,8 +466,9 @@ async function saveUserPlace(form) {
   const data = new FormData(form);
   let lat; let lon;
   if (data.get('where') === 'map') {
-    initMap();
-    ({ lat, lng: lon } = map.getCenter());
+    const c = mapCenter();
+    if (!c) { toast('Map not available — choose “My current location”.'); return; }
+    ({ lat, lon } = c);
   } else if (state.pos) {
     ({ lat, lon } = state.pos);
   } else {
@@ -572,7 +575,7 @@ function bindEvents() {
     if (act === 'map') {
       const p = state.places.find((x) => x.id === id);
       showView('map');
-      map.setView([p.lat, p.lon], 18);
+      map?.setView([p.lat, p.lon], 18);
       return;
     }
     if (act === 'ext') { openExternal(actEl.dataset.url); return; }
@@ -613,17 +616,18 @@ function bindEvents() {
   });
   $('#clearTilesBtn').addEventListener('click', async () => {
     if (!window.confirm('Remove saved map pictures? Your places are kept.')) return;
-    await clearTiles();
+    await clearMapCache();
     renderRegions();
   });
 
   $('#recenterBtn').addEventListener('click', () => {
-    if (state.pos) map.setView([state.pos.lat, state.pos.lon], 16);
+    if (state.pos) map?.setView([state.pos.lat, state.pos.lon], 16);
     else toast('No location yet');
   });
   $('#setHereBtn').addEventListener('click', () => {
+    if (!map) return;
     const c = map.getCenter();
-    state.pos = { lat: c.lat, lon: c.lng, acc: 0, ts: Date.now(), manual: true };
+    state.pos = { lat: c.lat, lon: c.lon, acc: 0, ts: Date.now(), manual: true };
     savePref('lastPos', state.pos);
     updateLocStatus();
     updateMeMarker();

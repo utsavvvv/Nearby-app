@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -104,7 +104,7 @@
         <ul class="tips">
           <li>GPS works without internet — keep location turned on.</li>
           <li>Tap 🧭 to turn on the compass, then follow the arrow next to each place.</li>
-          <li>Map pictures you look at while online are kept for offline use. Browse your area once on the Map tab.</li>
+          <li>Map areas you look at while online are kept for offline use. Browse your area once on the Map tab (zoom in on the streets you need).</li>
           <li>Many pan shops and tea stalls aren't on the map yet — tap <b>＋</b> to add one. It's saved only on your phone.</li>
         </ul>
       </div>
@@ -113,7 +113,7 @@
         <h2>About</h2>
         <p class="muted small">Nearby Offline v__APP_VERSION__ · No account, no tracking. Your location never leaves your phone except to fetch map data for the area you choose.</p>
         <p class="small"><a href="privacy.html">Privacy policy</a> · <a id="supportLink" href="#" target="_blank" rel="noopener">Report a problem</a></p>
-        <p class="muted small">Place data and map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL).</p>
+        <p class="muted small">Place data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL). Map by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a>.</p>
       </div>
     </section>
   </main>
@@ -155,7 +155,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="vendor/leaflet/leaflet.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
