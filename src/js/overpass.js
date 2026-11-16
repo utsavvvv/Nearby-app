@@ -1,0 +1,82 @@
+// Downloads places from OpenStreetMap through the public Overpass API.
+// Only needed once per area while online; afterwards everything is read from IndexedDB.
+
+import { buildOverpassQuery, classify } from './categories.js';
+import { OVERPASS_ENDPOINTS, OVERPASS_TIMEOUT_MS } from './config.js';
+
+export class DownloadError extends Error {}
+
+async function fetchWithTimeout(url, options, ms, signal) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DownloadError('The server took too long to answer')), ms);
+  const onAbort = () => ctrl.abort(signal.reason);
+  signal?.addEventListener('abort', onAbort);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/**
+ * Fetch all supported places within radiusMeters of (lat, lon).
+ * Tries each Overpass server in turn. Pass an AbortSignal to cancel.
+ */
+export async function fetchPlaces(lat, lon, radiusMeters, regionId, { signal, endpoints = OVERPASS_ENDPOINTS, timeoutMs = OVERPASS_TIMEOUT_MS } = {}) {
+  const query = buildOverpassQuery(lat, lon, radiusMeters);
+  let lastError;
+  for (const url of endpoints) {
+    if (signal?.aborted) throw signal.reason ?? new DownloadError('Cancelled');
+    try {
+      const res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+      }, timeoutMs, signal);
+      if (res.status === 429) throw new DownloadError('The map data server is busy (too many requests)');
+      if (!res.ok) throw new DownloadError(`The map data server answered with error ${res.status}`);
+      const json = await res.json();
+      // Overpass reports timeouts / memory errors inside a 200 response.
+      if (json.remark && /error|timed out/i.test(json.remark) && !(json.elements || []).length) {
+        throw new DownloadError('The map data server could not finish — try a smaller radius');
+      }
+      return toPlaces(json.elements || [], regionId);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      lastError = err;
+    }
+  }
+  if (lastError instanceof DownloadError) throw lastError;
+  throw new DownloadError('Could not reach the map data servers. Check your internet connection.');
+}
+
+const clip = (s, n = 200) => (typeof s === 'string' ? s.slice(0, n) : '');
+
+export function toPlaces(elements, regionId) {
+  const places = [];
+  for (const el of elements) {
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    const tags = el.tags || {};
+    const cat = classify(tags);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !cat) continue;
+    const enName = tags['name:en'];
+    places.push({
+      id: `osm:${el.type}/${el.id}`,
+      source: 'osm',
+      regionId,
+      lat,
+      lon,
+      cat,
+      name: clip(enName || tags.name, 120),
+      localName: enName && tags.name && tags.name !== enName ? clip(tags.name, 120) : '',
+      hours: clip(tags.opening_hours),
+      phone: clip(tags.phone || tags['contact:phone'], 60),
+      address: clip([tags['addr:housenumber'], tags['addr:street'], tags['addr:suburb'] || tags['addr:city']]
+        .filter(Boolean).join(', ')),
+      kind: clip((tags.shop || tags.amenity || tags.tourism || tags.railway || '').replace(/_/g, ' '), 40),
+    });
+  }
+  return places;
+}

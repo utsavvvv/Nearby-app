@@ -1,0 +1,38 @@
+{
+  "name": "nearby-offline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first travel app to find nearby stores, pan shops, ATMs, pharmacies and more.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "npm run build && node scripts/serve.mjs dist 8080",
+    "lint": "eslint .",
+    "test": "node --test \"test/unit/**/*.test.js\"",
+    "test:e2e": "npm run build && playwright test",
+    "check": "npm run lint && npm test && npm run test:e2e",
+    "build:android": "node scripts/build.mjs --target=android",
+    "android:sync": "npm run build:android && cap sync android",
+    "android:open": "cap open android"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3",
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "1.63.0",
+    "eslint": "^9.39.5",
+    "fake-indexeddb": "^6.2.8",
+    "globals": "^17.14.0"
+  }
+}

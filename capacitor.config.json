@@ -1,0 +1,14 @@
+{
+  "appId": "app.nearbyoffline.travel",
+  "appName": "Nearby Offline",
+  "webDir": "www",
+  "android": {
+    "appendUserAgent": "NearbyOffline-Android",
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
