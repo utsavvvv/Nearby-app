@@ -6,8 +6,10 @@ import { isOpenAt } from './hours.js';
 import { sanitizePlace, sanitizeRegion } from './model.js';
 import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache } from './map.js';
 import { isNative, openExternal, saveTextFile } from './platform.js';
+import { hotelUrl, areaHotelsUrl } from './hotels.js';
+import { ProStore } from './pro.js';
 import {
-  DEFAULT_CENTER, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
+  DEFAULT_CENTER, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
 } from './config.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -27,6 +29,11 @@ const state = {
   openId: null,
   download: null, // AbortController of a running download
 };
+
+const pro = new ProStore({
+  plugin: isNative ? window.Capacitor?.Plugins?.NativePurchases || null : null,
+  storage: (() => { try { return window.localStorage; } catch { return null; } })(),
+});
 
 // ---------- utilities ----------
 function esc(s) {
@@ -240,6 +247,10 @@ function placeItem(p) {
         <button class="btn small ghost" data-act="ext" data-url="${esc(navUrl)}">↗ Directions (online)</button>
         ${p.source === 'user' ? '<button class="btn small danger" data-act="delete">Delete</button>' : ''}
       </div>
+      ${p.cat === 'stay' && navigator.onLine ? `<div class="partner">
+        <button class="btn small partner-btn" data-act="ext" data-url="${esc(hotelUrl(p, areaNameFor(p.lat, p.lon)))}">🏨 Check prices &amp; book</button>
+        <span class="muted small">Opens Booking.com. We may earn a commission, at no extra cost to you.</span>
+      </div>` : ''}
     </div>
   </li>`;
 }
@@ -270,7 +281,27 @@ function renderBanner(gpsError) {
   b.hidden = true;
 }
 
+/** Name of the saved area that contains a point (used for hotel searches). */
+function areaNameFor(lat, lon) {
+  let best = null; let bestD = Infinity;
+  for (const r of state.regions) {
+    const d = distance(r.lat, r.lon, lat, lon);
+    if (d <= r.radius && d < bestD) { best = r; bestD = d; }
+  }
+  return best && !best.name.startsWith('Area at ') ? best.name : '';
+}
+
+function renderHotelCard() {
+  const card = $('#hotelCard');
+  const here = state.pos ? areaNameFor(state.pos.lat, state.pos.lon) : '';
+  card.hidden = !(state.cat === 'stay' && navigator.onLine && here);
+  if (card.hidden) return;
+  card.innerHTML = `<div><b>Looking for a room in ${esc(here)}?</b><br><span class="muted small">Compare prices and book online. Partner link: we may earn a commission, at no extra cost to you.</span></div>
+    <button class="btn small partner-btn" data-act="ext" data-url="${esc(areaHotelsUrl(here))}">Compare hotels</button>`;
+}
+
 function renderList() {
+  renderHotelCard();
   const items = filteredPlaces();
   const shown = items.slice(0, MAX_LIST);
   $('#list').innerHTML = shown.map(placeItem).join('')
@@ -370,13 +401,20 @@ async function downloadArea(lat, lon, label) {
   if (state.download) { toast('A download is already running'); return; }
   if (!navigator.onLine) { toast('You are offline. Connect to the internet to save an area.'); return; }
   const radius = Number($('#radius').value);
+  const id = `r:${lat.toFixed(3)},${lon.toFixed(3)},${radius}`;
+  const limits = pro.limits();
+  if (radius > limits.maxRadius) { showPro(`Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`); return; }
+  const isRefresh = state.regions.some((r) => r.id === id);
+  if (!isRefresh && state.regions.length >= limits.maxAreas) {
+    showPro(`Free version keeps ${FREE_MAX_AREAS} saved areas. Delete one, or get Pro for unlimited areas.`);
+    return;
+  }
   const status = $('#dlStatus');
   const ctrl = new AbortController();
   state.download = ctrl;
   setDownloading(true);
   status.textContent = `Downloading places within ${radius / 1000} km… this can take up to a minute.`;
   try {
-    const id = `r:${lat.toFixed(3)},${lon.toFixed(3)},${radius}`;
     const places = await fetchPlaces(lat, lon, radius, id, { signal: ctrl.signal });
     const region = { id, lat, lon, radius, name: label || `Area at ${lat.toFixed(3)}, ${lon.toFixed(3)}`, count: places.length, savedAt: Date.now() };
     await db.saveRegion(region, places);
@@ -548,6 +586,55 @@ async function loadData() {
   if (state.view === 'areas') renderRegions();
 }
 
+// ---------- Pro ----------
+function renderPro() {
+  $('#proBadge').hidden = !pro.active;
+  document.querySelectorAll('#radius option[data-pro]').forEach((o) => {
+    o.textContent = `${Number(o.value) / 1000} km${pro.active ? '' : ' (Pro)'}${o.value === '20000' ? ' — large, slower' : ''}`;
+  });
+  const card = $('#proCard');
+  if (pro.active) {
+    card.innerHTML = '<h2>⭐ Nearby Pro</h2><p class="muted">Thank you for supporting the app! Unlimited areas and large radius are unlocked.</p>';
+    return;
+  }
+  const buyLabel = pro.canBuyHere ? `Get Pro${pro.price ? ` · ${esc(pro.price)}` : ''}` : 'Get Pro in the Android app';
+  card.innerHTML = `<h2>⭐ Nearby Pro</h2>
+    <p class="muted">One-time purchase, no subscription.</p>
+    <ul class="tips"><li>Unlimited saved areas: whole trips, many cities</li><li>10 km and 20 km areas</li><li>Supports development of the app</li></ul>
+    ${pro.pending ? '<p class="small"><b>Payment pending.</b> Pro unlocks as soon as Google Play confirms it.</p>' : ''}
+    <div class="btn-row">
+      <button class="btn" data-pro="buy">${buyLabel}</button>
+      ${pro.canBuyHere ? '<button class="btn ghost" data-pro="restore">Restore purchase</button>' : ''}
+    </div>
+    <p class="muted small">Free: ${FREE_MAX_AREAS} areas, up to ${FREE_MAX_RADIUS / 1000} km. Payments are handled by Google Play.</p>`;
+}
+
+function showPro(reason) {
+  $('#proReason').textContent = reason;
+  $('#proDialogBuy').textContent = pro.canBuyHere ? `Get Pro${pro.price ? ` · ${pro.price}` : ''}` : 'Get Pro in the Android app';
+  $('#proDialog').showModal();
+}
+
+async function buyPro() {
+  if (!pro.canBuyHere) { openExternal(PLAY_STORE_URL); return; }
+  if (!navigator.onLine) { toast('Buying needs internet'); return; }
+  try {
+    const result = await pro.buy();
+    if (result === 'active') toast('⭐ Pro unlocked. Thank you!');
+    else if (result === 'pending') toast('Payment pending. Pro unlocks when Google Play confirms it.', 5000);
+  } catch (err) {
+    toast(`Purchase failed: ${err.message || err}`);
+  }
+  renderPro();
+}
+
+async function restorePro() {
+  if (!navigator.onLine) { toast('Restoring needs internet'); return; }
+  const active = await pro.restore().catch(() => false);
+  toast(active ? '⭐ Pro restored' : 'No Pro purchase found for this Google account');
+  renderPro();
+}
+
 // ---------- events ----------
 function bindEvents() {
   $('#chips').addEventListener('click', (e) => {
@@ -600,6 +687,22 @@ function bindEvents() {
   $('#dlMapBtn').addEventListener('click', downloadAroundMap);
   $('#dlCancelBtn').addEventListener('click', () => state.download?.abort());
   $('#placeSearch').addEventListener('submit', searchTown);
+  $('#proCard').addEventListener('click', (e) => {
+    const act = e.target.closest('[data-pro]')?.dataset.pro;
+    if (act === 'buy') buyPro();
+    if (act === 'restore') restorePro();
+  });
+  $('#proDialog').addEventListener('close', () => { if ($('#proDialog').returnValue === 'buy') buyPro(); });
+  $('#radius').addEventListener('change', (e) => {
+    if (Number(e.target.value) > pro.limits().maxRadius) {
+      e.target.value = String(FREE_MAX_RADIUS);
+      showPro(`Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`);
+    }
+  });
+  $('#hotelCard').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act="ext"]');
+    if (btn) openExternal(btn.dataset.url);
+  });
   $('#regions').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-act]');
     if (!btn) return;
@@ -683,6 +786,9 @@ async function main() {
   startGps();
   if (loadPref('compass', false) && typeof DeviceOrientationEvent?.requestPermission !== 'function') toggleCompass();
   registerServiceWorker();
+  pro.onChange(renderPro);
+  renderPro();
+  pro.refresh().then(() => pro.loadPrice()).then(renderPro);
 }
 
 main();

@@ -219,3 +219,9 @@ body.doc { display: block; padding: 16px; }
 .prose { max-width: 720px; margin: 0 auto; line-height: 1.55; }
 .prose h1 { font-size: 1.5rem; margin: .4rem 0; }
 .prose h2 { margin-top: 1.2rem; }
+
+/* Earning: Pro and partner links */
+.pro-badge { font-size: .65rem; vertical-align: middle; background: #fde68a; color: #4a3500; padding: .1rem .35rem; border-radius: 6px; margin-left: .2rem; letter-spacing: .04em; }
+.partner { margin-top: .6rem; padding-top: .55rem; border-top: 1px dashed var(--border); display: grid; gap: .3rem; justify-items: start; }
+.partner-btn { background: #003b95; color: #fff; }
+.partner-card { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }

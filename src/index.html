@@ -18,7 +18,7 @@
     <div class="brand">
       <span class="logo" aria-hidden="true">📍</span>
       <div>
-        <h1>Nearby Offline</h1>
+        <h1>Nearby Offline <span id="proBadge" class="pro-badge" hidden>PRO</span></h1>
         <p id="locStatus" class="sub" aria-live="polite">Finding your location…</p>
       </div>
     </div>
@@ -43,6 +43,7 @@
         <label class="toggle"><input id="hideClosed" type="checkbox"> Hide closed</label>
       </div>
       <div id="banner" class="banner" hidden></div>
+      <div id="hotelCard" class="banner partner-card" hidden></div>
       <ul id="list" class="list"></ul>
       <p id="listMore" class="muted center" hidden></p>
     </section>
@@ -66,8 +67,8 @@
           <select id="radius">
             <option value="2000">2 km</option>
             <option value="5000" selected>5 km</option>
-            <option value="10000">10 km</option>
-            <option value="20000">20 km (large, slower)</option>
+            <option value="10000" data-pro>10 km</option>
+            <option value="20000" data-pro>20 km — large, slower</option>
           </select>
         </label>
         <div class="btn-row">
@@ -89,6 +90,8 @@
         <p id="storage" class="muted small"></p>
         <button id="clearTilesBtn" class="btn small ghost">Clear saved map pictures</button>
       </div>
+
+      <div class="card" id="proCard"></div>
 
       <div class="card">
         <h2>Backup & share</h2>
@@ -149,6 +152,18 @@
       <div class="btn-row end">
         <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
         <button value="save" class="btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="proDialog" aria-labelledby="proTitle">
+    <form method="dialog">
+      <h2 id="proTitle">⭐ Nearby Pro</h2>
+      <p id="proReason"></p>
+      <p class="muted small">One-time purchase: unlimited saved areas and 10–20 km areas.</p>
+      <div class="btn-row end">
+        <button value="cancel" class="btn ghost">Not now</button>
+        <button value="buy" class="btn" id="proDialogBuy">Get Pro</button>
       </div>
     </form>
   </dialog>

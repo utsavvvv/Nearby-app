@@ -11,6 +11,7 @@ const ELEMENTS = [
   { type: 'node', id: 5, lat: 25.3100, lon: 82.9739, tags: { shop: 'kiosk' } },
   { type: 'node', id: 6, lat: 25.3190, lon: 82.9745, tags: { amenity: 'cafe', name: 'Chai Point' } },
   { type: 'node', id: 7, lat: 25.3190, lon: 82.9745, tags: { amenity: 'bench' } },
+  { type: 'node', id: 8, lat: 25.3300, lon: 82.9900, tags: { tourism: 'hotel', name: 'Hotel Ganges View' } },
 ];
 
 test.use({ geolocation: HOME, permissions: ['geolocation'] });
@@ -44,19 +45,20 @@ test.beforeEach(async ({ context }) => {
   await context.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: { address: { suburb: 'Godowlia' } } }));
   await context.route(/nominatim\.openstreetmap\.org\/search/, (r) => r.fulfill({ json: [{ lat: '25.3176', lon: '82.9739', name: 'Varanasi', display_name: 'Varanasi, Uttar Pradesh, India' }] }));
   await mockMap(context);
+  await context.route(/^https:\/\/(www\.booking\.com|play\.google\.com)\//, (r) => r.fulfill({ contentType: 'text/html', body: '<h1>partner</h1>' }));
 });
 
 async function saveArea(page) {
   await page.goto('/');
   await page.getByRole('button', { name: /Save area around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 6 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
   await page.getByRole('button', { name: 'Nearby' }).click();
 }
 
 test('saves an area and lists places nearest first', async ({ page }) => {
   await saveArea(page);
   const names = page.locator('.place .name');
-  await expect(names).toHaveCount(6);
+  await expect(names).toHaveCount(7);
   await expect(names.first()).toHaveText('Raju Pan Bhandar');
   await expect(page.locator('.place').first()).toContainText('Open now');
   await expect(page.locator('.place', { hasText: 'Gupta' })).toContainText('Closed');
@@ -141,7 +143,7 @@ test('export and import round-trip', async ({ page }) => {
   await expect(page.locator('#regions')).toContainText('No areas saved yet');
 
   await page.locator('#importInput').setInputFiles(file);
-  await expect(page.locator('#toast')).toContainText('Imported 1 areas and 6 places');
+  await expect(page.locator('#toast')).toContainText('Imported 1 areas and 7 places');
   await expect(page.locator('#regions')).toContainText('Godowlia');
 });
 
@@ -151,7 +153,7 @@ test('town search offers to save that town', async ({ page }) => {
   await page.locator('#placeQuery').fill('Varanasi');
   await page.getByRole('button', { name: 'Find' }).click();
   await page.getByRole('button', { name: /Save this town/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 6 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
   await expect(page.locator('#regions')).toContainText('Varanasi');
 });
 
@@ -181,4 +183,100 @@ test('offers an update when a new version is deployed', async ({ page }) => {
   } finally {
     await writeFile(swPath, original);
   }
+});
+
+test('hotels link to Booking.com with a commission notice', async ({ page, context }) => {
+  await saveArea(page);
+  await page.locator('.chip[data-cat=stay]').click();
+  await expect(page.locator('#hotelCard')).toContainText('Looking for a room in Godowlia?');
+  await page.locator('.place-main', { hasText: 'Hotel Ganges View' }).click();
+  const partner = page.locator('.place.open .partner');
+  await expect(partner).toContainText('may earn a commission');
+
+  const [popup] = await Promise.all([context.waitForEvent('page'), partner.getByRole('button', { name: /Check prices/ }).click()]);
+  await popup.waitForLoadState();
+  const url = new URL(popup.url());
+  expect(url.host).toBe('www.booking.com');
+  expect(url.searchParams.get('ss')).toBe('Hotel Ganges View, Godowlia');
+
+  // No booking buttons offline.
+  await context.setOffline(true);
+  await page.locator('.chip[data-cat=all]').click();
+  await page.locator('.chip[data-cat=stay]').click();
+  await expect(page.locator('#hotelCard')).toBeHidden();
+});
+
+test('free version limits areas and radius, Pro dialog explains', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await expect(page.locator('#proCard')).toContainText('Get Pro in the Android app');
+
+  // Bigger radius needs Pro.
+  await page.locator('#radius').selectOption('10000');
+  await expect(page.locator('#proDialog')).toBeVisible();
+  await expect(page.locator('#proReason')).toContainText('up to 5 km');
+  await page.getByRole('button', { name: 'Not now' }).click();
+  await expect(page.locator('#radius')).toHaveValue('5000');
+
+  // Two areas are free; the third asks for Pro.
+  await page.getByRole('button', { name: /Around me/ }).click();
+  await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
+  await context.setGeolocation({ latitude: 25.4, longitude: 82.9 });
+  await page.waitForTimeout(300);
+  await page.getByRole('button', { name: /Around me/ }).click();
+  await expect(page.locator('#regions li')).toHaveCount(2);
+  await context.setGeolocation({ latitude: 25.5, longitude: 82.8 });
+  await page.waitForTimeout(300);
+  await page.getByRole('button', { name: /Around me/ }).click();
+  await expect(page.locator('#proReason')).toContainText('keeps 2 saved areas');
+
+  // On the web, "Get Pro" goes to the Play Store listing.
+  const [popup] = await Promise.all([context.waitForEvent('page'), page.locator('#proDialogBuy').click()]);
+  await popup.waitForLoadState();
+  expect(popup.url()).toContain('play.google.com/store/apps/details?id=app.nearbyoffline.travel');
+});
+
+test('Android app: buying Pro through Google Play unlocks it', async ({ page }) => {
+  // Pretend to be the Android app with a fake Google Play Billing plugin.
+  await page.addInitScript(() => {
+    // The fake "Google Play" remembers purchases across reloads, like the real one.
+    const owned = JSON.parse(sessionStorage.getItem('fakePlay') || '[]');
+    window.Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        App: { addListener() {} },
+        NativePurchases: {
+          async getPurchases() { return { purchases: owned }; },
+          async getProducts() { return { products: [{ identifier: 'nearby_pro', priceString: '₹79.00' }] }; },
+          async purchaseProduct() {
+            const tx = { productIdentifier: 'nearby_pro', purchaseState: '1', isAcknowledged: false, purchaseToken: 'tok' };
+            owned.push(tx);
+            sessionStorage.setItem('fakePlay', JSON.stringify(owned));
+            return tx;
+          },
+          async acknowledgePurchase() { window.__acked = true; },
+          async restorePurchases() {},
+        },
+      },
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  const buy = page.locator('#proCard').getByRole('button', { name: 'Get Pro · ₹79.00' });
+  await expect(buy).toBeVisible();
+  await expect(page.locator('#proCard')).toContainText('Restore purchase');
+  await buy.click();
+  await expect(page.locator('#toast')).toContainText('Pro unlocked');
+  await expect(page.locator('#proBadge')).toBeVisible();
+  await expect(page.locator('#proCard')).toContainText('Thank you');
+  expect(await page.evaluate(() => window.__acked)).toBe(true);
+
+  // Big areas now allowed without the Pro dialog.
+  await page.locator('#radius').selectOption('20000');
+  await expect(page.locator('#proDialog')).toBeHidden();
+  await expect(page.locator('#radius')).toHaveValue('20000');
+
+  // Still Pro after restarting the app.
+  await page.reload();
+  await expect(page.locator('#proBadge')).toBeVisible();
 });

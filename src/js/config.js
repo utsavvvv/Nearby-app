@@ -29,3 +29,18 @@ export const DEFAULT_CENTER = [22.5726, 88.3639];
 
 // Suggest refreshing a saved area after this many days.
 export const STALE_AFTER_DAYS = 60;
+
+// ---- Earning ----
+
+// Hotel booking partner. Join the Booking.com affiliate programme
+// (https://www.booking.com/affiliate-program/) and put your affiliate ID (aid) here to earn
+// commission. With an empty ID the links still work, they just don't earn anything.
+export const BOOKING_AFFILIATE_ID = '';
+
+// "Nearby Pro": a one-time in-app purchase on Google Play.
+// Create a one-time product with exactly this ID in Play Console → Monetize → In-app products.
+export const PRO_PRODUCT_ID = 'nearby_pro';
+export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=app.nearbyoffline.travel';
+// What the free version allows. Pro removes these limits.
+export const FREE_MAX_AREAS = 2;
+export const FREE_MAX_RADIUS = 5000;

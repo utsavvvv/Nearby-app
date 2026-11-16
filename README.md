@@ -24,6 +24,8 @@ There's no server, no account and no tracking. Everything is stored on the phone
 | Street map with markers (OpenFreeMap) | Areas you've viewed online are cached for offline use |
 | Directions | Hands off to the phone's maps app |
 | App updates | Web: shows "A new version is ready" → *Update* |
+| Hotel "Check prices & book" links (Booking.com affiliate) | Yes |
+| **Nearby Pro** (one-time Google Play purchase): unlimited areas, 10–20 km areas | Buying needs internet; Pro works offline |
 
 **Categories:** 🌿 Pan & Tobacco (incl. kiosks) · 🛒 Stores & Grocery · ☕ Tea & Cafe · 🍛 Food · 💊 Pharmacy · 🏧 ATM & Bank · 🏥 Hospital & Clinic · 🚻 Toilets · 🚰 Drinking Water · 🛏️ Hotels · 🚉 Bus, Train & Taxi · ⛽ Fuel · 👮 Police
 
@@ -58,6 +60,8 @@ src/
     map.js          street map (MapLibre + OpenFreeMap) with offline caching
     model.js        validation of imported data
     platform.js     web vs Android differences (links, file export)
+    pro.js          Nearby Pro purchase and free limits (Google Play Billing)
+    hotels.js       hotel booking (affiliate) links
     geo.js          distance / bearing helpers
 scripts/            build, local server, Android icon generator
 test/unit, test/e2e
@@ -75,6 +79,11 @@ npm run android:open   # open in Android Studio (needs Android SDK + JDK 21)
 You don't need Android Studio for releases. The **Android app** workflow builds a debug APK on every push. With signing secrets set, it also builds a signed AAB for Google Play. See [docs/RELEASING.md](docs/RELEASING.md).
 
 To change the app icon, edit `src/icons/icon.svg` and run `node scripts/android-assets.mjs`.
+
+## Earning
+
+- **Hotel links:** join the [Booking.com affiliate programme](https://www.booking.com/affiliate-program/) and put your ID in `BOOKING_AFFILIATE_ID` (`src/js/config.js`).
+- **Nearby Pro:** a one-time in-app product `nearby_pro` in Play Console. Free limits (`FREE_MAX_AREAS`, `FREE_MAX_RADIUS`) are in the same config file. See [docs/RELEASING.md](docs/RELEASING.md#selling-nearby-pro).
 
 ## Before going live
 

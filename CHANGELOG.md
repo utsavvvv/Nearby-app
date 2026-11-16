@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+
+- Hotels: "Check prices & book" on each hotel and "Compare hotels" for your area (Booking.com
+  affiliate links, with a clear commission notice). Hidden offline.
+- Nearby Pro: one-time Google Play purchase. Free keeps 2 saved areas up to 5 km; Pro unlocks
+  unlimited areas and 10/20 km. Restore purchase, pending payments and refunds handled.
+
 ## 1.1.0
 
 - New street map: OpenFreeMap vector map drawn with MapLibre (no API key). Fixes the
