@@ -4,8 +4,10 @@
 
 export const CATEGORIES = [
   {
-    id: 'pan', label: 'Pan & Tobacco', icon: '🌿', color: '#2e7d32',
-    match: { shop: ['tobacco', 'pan', 'paan', 'betel', 'e-cigarette', 'kiosk', 'newsagent'] },
+    // Shown as "Paan & Kiosks". OSM tags paan shops mostly as shop=tobacco. (E-cigarette shops are
+    // left out: e-cigarettes are banned in India.)
+    id: 'pan', label: 'Paan & Kiosks', icon: '🌿', color: '#2e7d32',
+    match: { shop: ['tobacco', 'pan', 'paan', 'betel', 'kiosk', 'newsagent'] },
   },
   {
     id: 'grocery', label: 'Stores & Grocery', icon: '🛒', color: '#ef6c00',
@@ -98,7 +100,7 @@ export function buildOverpassQuery(lat, lon, radiusMeters) {
 // Everyday words people type, so "school" or "chemist" can be recognised as a category
 // rather than the name of a town.
 const KEYWORDS = {
-  pan: ['pan', 'paan', 'tobacco', 'cigarette', 'bidi', 'kiosk', 'pan shop', 'paan shop'],
+  pan: ['pan', 'paan', 'tobacco', 'cigarette', 'bidi', 'kiosk', 'pan shop', 'paan shop', 'paan wala', 'pan wala', 'gumti'],
   grocery: ['store', 'shop', 'grocery', 'kirana', 'supermarket', 'general store', 'bakery', 'dairy', 'mall'],
   tea: ['tea', 'chai', 'cafe', 'coffee', 'tea stall'],
   food: ['food', 'restaurant', 'dhaba', 'eat', 'eatery', 'fast food', 'canteen'],
@@ -123,4 +125,10 @@ export function categoryForQuery(text) {
     if (words.some((w) => forms.has(w))) return id;
   }
   return null;
+}
+
+// Friendlier names for some OpenStreetMap shop types when shown to people.
+const KIND_NAMES = { tobacco: 'paan shop', pan: 'paan shop', paan: 'paan shop', betel: 'paan shop', newsagent: 'news stand' };
+export function kindLabel(kind) {
+  return KIND_NAMES[kind] || kind || '';
 }

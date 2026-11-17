@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1
+
+- "Pan & Tobacco" is now "Paan & Kiosks"; OSM "tobacco" shops show as "paan shop".
+  E-cigarette shops are no longer listed (banned in India).
+- More compact route sheet, so more of the map and route stay visible.
+- Play Store assets: feature graphic, icon, 6 screenshots and listing text in store/.
+
 ## 2.0.0
 
 New look, from the Google Stitch design: a Gen-Z "zine sticker-book" style.

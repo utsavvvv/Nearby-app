@@ -29,7 +29,7 @@ There's no server, no account and no tracking. Everything is stored on the phone
 | Hotel "Check prices & book" links (Booking.com affiliate) | Yes |
 | **Nearby Pro** (one-time Google Play purchase): unlimited areas, 10–20 km areas | Buying needs internet; Pro works offline |
 
-**Categories:** 🌿 Pan & Tobacco (incl. kiosks) · 🛒 Stores & Grocery · ☕ Tea & Cafe · 🍛 Food · 💊 Pharmacy · 🏧 ATM & Bank · 🏥 Hospital & Clinic · 🚻 Toilets · 🚰 Drinking Water · 🛏️ Hotels · 🚉 Bus, Train & Taxi · ⛽ Fuel · 👮 Police
+**Categories:** 🌿 Paan & Kiosks · 🛒 Stores & Grocery · ☕ Tea & Cafe · 🍛 Food · 💊 Pharmacy · 🏧 ATM & Bank · 🏥 Hospital & Clinic · 🚻 Toilets · 🚰 Drinking Water · 🛏️ Hotels · 🚉 Bus, Train & Taxi · ⛽ Fuel · 👮 Police
 
 ## Development
 

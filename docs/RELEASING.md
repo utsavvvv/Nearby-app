@@ -44,6 +44,8 @@ Push a version tag (`npm version minor && git push --follow-tags`). The **Androi
 
 ### 4. Play Console checklist
 
+Store listing text, the feature graphic, the icon and screenshots are ready in [`store/`](../store/LISTING.md).
+
 - Create the app, then upload the `.aab` to *Internal testing* first. Turn on **Play App Signing** (the default).
 - **Privacy policy URL**: `https://<user>.github.io/<repo>/privacy.html`.
 - **Data safety** (based on what the app does; check it against your final build):
@@ -53,8 +55,8 @@ Push a version tag (`npm version minor && git push --follow-tags`). The **Androi
   - No accounts, no analytics, no ads. All requests use HTTPS (encrypted in transit).
   - Users can delete data by clearing app storage or uninstalling.
 - **Permissions declaration**: location is foreground only (no background location).
-- **Content rating** questionnaire: the app lists tobacco/pan shops as points of interest. Answer the questionnaire honestly. Usually this means a reference to tobacco, not promotion.
-- **Target audience**: adults (18+) is the simplest choice given the tobacco category.
+- **Content rating** questionnaire: the "Paan & Kiosks" category lists paan shops and kiosks, some of which sell tobacco, as points of interest. Answer the questionnaire honestly. Usually this means a reference to tobacco, not promotion. The app never sells, prices or promotes tobacco products.
+- **Target audience**: adults (18+) is the simplest choice given the paan category.
 - Screenshots: take them from the debug APK on a phone, or from the web app at phone size.
 
 ## Selling Nearby Pro

@@ -1,4 +1,4 @@
-import { CATEGORIES, CATEGORY_BY_ID, categoryForQuery } from './categories.js';
+import { CATEGORIES, CATEGORY_BY_ID, categoryForQuery, kindLabel } from './categories.js';
 import { distance, bearing, compassPoint, formatDistance, walkTime } from './geo.js';
 import * as db from './db.js';
 import { fetchPlaces, fetchRoads } from './overpass.js';
@@ -59,7 +59,7 @@ function savePref(key, value) {
 function displayName(p) {
   if (p.name) return p.name;
   const cat = CATEGORY_BY_ID[p.cat];
-  return p.kind ? `Unnamed ${p.kind}` : `Unnamed ${cat.label.toLowerCase()}`;
+  return p.kind ? `Unnamed ${kindLabel(p.kind)}` : `Unnamed ${cat.label.toLowerCase()}`;
 }
 function timeAgo(ts) {
   const s = Math.round((Date.now() - ts) / 1000);
@@ -263,7 +263,7 @@ function placeItem(p) {
   const hasPos = p.d != null;
   const isOpen = state.openId === p.id;
   const geoUrl = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}(${encodeURIComponent(displayName(p))})`;
-  const kind = p.kind && !cat.label.toLowerCase().includes(p.kind) ? p.kind : '';
+  const kind = p.kind && !cat.label.toLowerCase().includes(kindLabel(p.kind)) ? kindLabel(p.kind) : '';
   const openBadge = p.open === true ? '<span class="badge open">Open now</span>' : p.open === false ? '<span class="badge closed">Closed</span>' : '';
   const walk = hasPos ? `bas ${walkTime(p.d).replace(' walk', '')} walk` : '';
   const sub = [walk, p.note || kind].filter(Boolean).join(' · ');
@@ -656,9 +656,9 @@ function renderRoutePanel(message) {
   panel.hidden = false;
   panel.classList.toggle('nav-mode', Boolean(r.nav));
   panel.innerHTML = `<div class="route-head">
-      <div>
-        <div class="route-tags hide-in-nav"><span class="sticker blue-soft">${cat.icon} ${esc(cat.label)}</span>${offline ? '<span class="sticker lime tilt-r">saved offline</span>' : ''}</div>
-        <div class="route-dest">${esc(displayName(r.place))}</div>
+      <div class="grow">
+        <div class="route-dest">${cat.icon} ${esc(displayName(r.place))}</div>
+        <div class="route-sub hide-in-nav">${esc(cat.label)}${offline ? ' · <span class="sticker lime flat mini">saved offline</span>' : ''}</div>
       </div>
       <button class="icon-btn route-close" data-route-act="close" aria-label="Close route">✕</button>
     </div>
@@ -666,13 +666,15 @@ function renderRoutePanel(message) {
       <button role="radio" data-route-mode="walk" aria-checked="${r.mode === 'walk'}">🚶 Walk${time('walk')}</button>
       <button role="radio" data-route-mode="drive" aria-checked="${r.mode === 'drive'}">🚗 Drive${time('drive')}</button>
     </div>
-    ${message ? `<p class="muted small">${esc(message)}</p>` : res ? `<p class="route-sum"><b>${formatDuration(res.duration)}</b> · ${formatDistance(res.distance)}${r.mode === 'walk' ? `<span class="sticker peach flat">~${Math.round(res.distance / 0.75).toLocaleString('en-IN')} steps</span>` : ''}</p>
-      <div class="info-box"><p><span>↱</span><span>${esc(step)}</span></p>
-        <p class="small route-note"><span>${offline ? '✅' : 'ⓘ'}</span><span>${esc(notes[r.source])}</span></p></div>` : ''}
-    ${res && !message ? (r.nav
-    ? '<button class="btn big" data-route-act="endnav">■ End navigation</button>'
-    : `<button class="btn lime big" data-route-act="nav">🧭 Start ${offline ? 'offline ' : ''}navigation</button>`) : ''}
-    <div class="route-links hide-in-nav"><button class="btn link" data-route-act="ext" data-url="${esc(gmaps)}">Turn-by-turn in Google Maps ↗</button></div>`;
+    ${message ? `<p class="muted small">${esc(message)}</p>` : res ? `<p class="route-sum"><b>${formatDuration(res.duration)}</b> · ${formatDistance(res.distance)}${r.mode === 'walk' ? `<span class="sticker peach flat mini">~${Math.round(res.distance / 0.75).toLocaleString('en-IN')} steps</span>` : ''}</p>
+      <p class="route-step">↱ ${esc(step)}</p>
+      <p class="small route-note">${offline ? '✅' : 'ⓘ'} ${esc(notes[r.source])}</p>` : ''}
+    <div class="route-actions">
+      ${res && !message ? (r.nav
+    ? '<button class="btn grow" data-route-act="endnav">■ End navigation</button>'
+    : `<button class="btn lime grow" data-route-act="nav">🧭 Start ${offline ? 'offline ' : ''}navigation</button>`) : ''}
+      <button class="btn soft hide-in-nav" data-route-act="ext" data-url="${esc(gmaps)}" aria-label="Turn-by-turn in Google Maps">G Maps ↗</button>
+    </div>`;
 }
 
 /** Follow the user on the map along the route. */

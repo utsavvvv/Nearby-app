@@ -52,3 +52,11 @@ test('recognises kinds of places typed as search text', async () => {
   assert.equal(categoryForQuery('Varanasi'), null);
   assert.equal(categoryForQuery(''), null);
 });
+
+test('paan category naming', async () => {
+  const { CATEGORY_BY_ID, kindLabel } = await import('../../src/js/categories.js');
+  assert.equal(CATEGORY_BY_ID.pan.label, 'Paan & Kiosks');
+  assert.equal(kindLabel('tobacco'), 'paan shop');
+  assert.equal(kindLabel('kiosk'), 'kiosk');
+  assert.equal(classify({ shop: 'e-cigarette' }), null); // banned in India: not listed
+});

@@ -496,3 +496,18 @@ body.doc { display: block; padding: 16px; }
 }
 .sticker.peach { background: var(--peach); color: var(--text); }
 .pro-head h2 { white-space: nowrap; font-size: 1.55rem; }
+
+/* Compact route sheet */
+.route-panel .route-head .grow { min-width: 0; }
+.route-dest { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-sub { font: 700 .72rem/1.4 var(--display); text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin-top: .15rem; }
+.sticker.mini { font-size: .62rem; padding: .18rem .4rem; box-shadow: none; vertical-align: middle; }
+.route-panel .route-sum b { font-size: 1.55rem; }
+.route-step { margin: 0; font-weight: 700; font-size: .9rem; }
+.route-actions { display: flex; gap: .55rem; }
+.route-actions .grow { flex: 1; }
+.route-actions .btn { padding: .7rem .8rem; font-size: .88rem; text-transform: uppercase; letter-spacing: .03em; }
+.route-panel .route-close { width: 36px; height: 36px; }
+.dl-buttons .btn { white-space: nowrap; padding: .7rem .6rem; }
+.hero { flex-wrap: wrap; row-gap: .45rem; }
+.hero b { white-space: nowrap; }
