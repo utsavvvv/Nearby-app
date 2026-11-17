@@ -33,6 +33,7 @@ async function mockMap(context) {
     const url = r.request().url();
     seen.push(url);
     if (url.endsWith('/styles/liberty')) return r.fulfill({ json: MAP_STYLE });
+    if (url.endsWith('/styles/dark')) return r.fulfill({ json: { ...MAP_STYLE, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#111111' } }] } });
     if (url.endsWith('/planet')) return r.fulfill({ json: TILEJSON });
     return r.fulfill({ status: 200, contentType: 'application/x-protobuf', body: Buffer.alloc(0) });
   });
@@ -339,4 +340,43 @@ test('typing "school" explains categories and lists nearest towns first', async 
   await hint.getByRole('button', { name: /Schools & Colleges/ }).click();
   await expect(page.locator('#view-list')).toBeVisible();
   await expect(page.locator('.chip[data-cat=education]')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('light, dark and system appearance', async ({ page }) => {
+  const styles = [];
+  page.on('request', (r) => { if (r.url().includes('/styles/')) styles.push(r.url().split('/').pop()); });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/');
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const lightBg = await bg();
+
+  // Header button cycles System -> Light -> Dark.
+  await page.locator('#themeBtn').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.locator('#themeBtn').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await bg()).not.toBe(lightBg);
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#134e48');
+
+  // The map uses the dark street style.
+  await page.getByRole('button', { name: 'Map' }).click();
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  await expect.poll(() => styles.includes('dark')).toBe(true);
+
+  // The choice is remembered, with no flash of light colours on reload.
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+  // Picker in Offline areas; "System" follows the phone.
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('radio', { name: /System/ }).click();
+  await expect(page.getByRole('radio', { name: /System/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /./);
+  expect(await bg()).toBe(lightBg);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  expect(await bg()).not.toBe(lightBg);
+
+  // "Light" wins even when the phone is in dark mode.
+  await page.getByRole('radio', { name: /Light/ }).click();
+  expect(await bg()).toBe(lightBg);
 });

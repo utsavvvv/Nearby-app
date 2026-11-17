@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Appearance: System (follows the phone), Light or Dark. Switch with the 🌓 button in the
+  header or under Offline areas → Appearance. Remembered, with no flash on start.
+- Dark street map in dark mode (falls back to the light map if the dark one isn't saved offline).
+
 ## 1.2.1
 
 - New category: 🏫 Schools & Colleges.

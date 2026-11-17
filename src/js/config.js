@@ -9,6 +9,7 @@ export const SUPPORT_URL = 'https://github.com/utsavvvv/Nearby-app/issues';
 // commercial use and allows keeping viewed map data for offline use. Other styles:
 // .../styles/bright, .../styles/positron. Any MapLibre style URL works if you change MAP_HOST too.
 export const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+export const MAP_STYLE_DARK_URL = 'https://tiles.openfreemap.org/styles/dark';
 export const MAP_HOST = 'tiles.openfreemap.org';
 export const MAX_CACHED_MAP_FILES = 8000; // vector tiles are small: roughly 100-200 MB at most
 

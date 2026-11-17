@@ -8,6 +8,7 @@ import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache } from './m
 import { isNative, openExternal, saveTextFile } from './platform.js';
 import { hotelUrl, areaHotelsUrl } from './hotels.js';
 import { ProStore } from './pro.js';
+import { getTheme, setTheme, isDark, onThemeChange } from './theme.js';
 import {
   DEFAULT_CENTER, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
 } from './config.js';
@@ -326,7 +327,7 @@ function initMap() {
   const start = state.pos ? [state.pos.lat, state.pos.lon] : (state.regions[0] ? [state.regions[0].lat, state.regions[0].lon] : DEFAULT_CENTER);
   try {
     if (!webglSupported()) throw new Error('WebGL not available');
-    map = new PlaceMap($('#map'), { center: start, zoom: state.pos ? 16 : 13 });
+    map = new PlaceMap($('#map'), { center: start, zoom: state.pos ? 16 : 13, dark: isDark() });
     map.on('moveend', renderMarkers);
     map.on('error', (e) => console.warn('map:', e.error?.message || e));
     updateMeMarker();
@@ -746,6 +747,24 @@ function bindEvents() {
   $('#dlMapBtn').addEventListener('click', downloadAroundMap);
   $('#dlCancelBtn').addEventListener('click', () => state.download?.abort());
   $('#placeSearch').addEventListener('submit', searchTown);
+  const THEMES = ['system', 'light', 'dark'];
+  const THEME_LABEL = { system: 'System (follows your phone)', light: 'Light', dark: 'Dark' };
+  $('#themePicker').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-theme-choice]');
+    if (b) setTheme(b.dataset.themeChoice);
+  });
+  $('#themeBtn').addEventListener('click', () => {
+    const next = THEMES[(THEMES.indexOf(getTheme()) + 1) % THEMES.length];
+    setTheme(next);
+    toast(`Appearance: ${THEME_LABEL[next]}`);
+  });
+  onThemeChange(({ theme, dark }) => {
+    document.querySelectorAll('[data-theme-choice]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === theme)));
+    $('#themeBtn').setAttribute('aria-label', `Appearance: ${THEME_LABEL[theme]}`);
+    $('#themeBtn').textContent = theme === 'system' ? '🌓' : theme === 'light' ? '☀️' : '🌙';
+    map?.setDark(dark);
+  });
+
   $('#proCard').addEventListener('click', (e) => {
     const act = e.target.closest('[data-pro]')?.dataset.pro;
     if (act === 'buy') buyPro();

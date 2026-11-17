@@ -23,6 +23,7 @@ There's no server, no account and no tracking. Everything is stored on the phone
 | Export / import places as a file (backup, share with friends) | No |
 | Street map with markers (OpenFreeMap) | Areas you've viewed online are cached for offline use |
 | Directions | Hands off to the phone's maps app |
+| Light / Dark / System appearance (dark street map too) | No |
 | App updates | Web: shows "A new version is ready" → *Update* |
 | Hotel "Check prices & book" links (Booking.com affiliate) | Yes |
 | **Nearby Pro** (one-time Google Play purchase): unlimited areas, 10–20 km areas | Buying needs internet; Pro works offline |
@@ -59,6 +60,7 @@ src/
     hours.js        opening_hours parser ("Open now")
     map.js          street map (MapLibre + OpenFreeMap) with offline caching
     model.js        validation of imported data
+    theme.js        light / dark / system appearance (theme-init.js applies it before first paint)
     platform.js     web vs Android differences (links, file export)
     pro.js          Nearby Pro purchase and free limits (Google Play Billing)
     hotels.js       hotel booking (affiliate) links
