@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0
+
+- 🏔️ Uttarakhand city packs: Rishikesh, Haridwar, Mussoorie, Nainital, Almora, Joshimath & Auli,
+  Badrinath, Kedarnath trek and Dehradun. One tap saves places, roads and the map plus ~11,000
+  extra shops, hotels, ATMs, chemists and more from Overture Maps (open data), with duplicates
+  of OpenStreetMap places removed. Dehradun and Kedarnath (bigger than 5 km) are Pro.
+- Town search suggests the city pack when there is one.
+- Unnamed ATMs, chemists and petrol pumps are named from their brand/operator.
+- Each place shows where its data comes from.
+- Packs are rebuilt monthly from the newest Overture release (GitHub Actions "City packs").
+
 ## 2.0.1
 
 - "Pan & Tobacco" is now "Paan & Kiosks"; OSM "tobacco" shops show as "paan shop".

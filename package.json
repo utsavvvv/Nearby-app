@@ -1,6 +1,6 @@
 {
   "name": "nearby-offline",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "private": true,
   "description": "Offline-first travel app to find nearby stores, pan shops, ATMs, pharmacies and more.",
   "type": "module",

@@ -1,0 +1,182 @@
+{
+  "app": "nearby-packs",
+  "version": 1,
+  "builtAt": "2026-11-17T19:29:33.278Z",
+  "packs": [
+    {
+      "id": "rishikesh",
+      "name": "Rishikesh",
+      "count": 1684,
+      "bytes": 433471,
+      "counts": {
+        "stay": 967,
+        "tea": 124,
+        "education": 86,
+        "pharmacy": 29,
+        "food": 187,
+        "grocery": 63,
+        "atm": 58,
+        "medical": 141,
+        "transport": 12,
+        "fuel": 7,
+        "police": 10
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.335Z"
+    },
+    {
+      "id": "haridwar",
+      "name": "Haridwar",
+      "count": 1564,
+      "bytes": 404278,
+      "counts": {
+        "food": 181,
+        "stay": 834,
+        "medical": 158,
+        "education": 129,
+        "atm": 99,
+        "fuel": 8,
+        "pharmacy": 41,
+        "tea": 26,
+        "grocery": 68,
+        "police": 11,
+        "transport": 8,
+        "pan": 1
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.380Z"
+    },
+    {
+      "id": "mussoorie",
+      "name": "Mussoorie",
+      "count": 1068,
+      "bytes": 268006,
+      "counts": {
+        "stay": 790,
+        "education": 38,
+        "food": 113,
+        "tea": 65,
+        "atm": 22,
+        "fuel": 6,
+        "police": 3,
+        "medical": 11,
+        "transport": 5,
+        "pharmacy": 4,
+        "grocery": 11
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.404Z"
+    },
+    {
+      "id": "nainital",
+      "name": "Nainital",
+      "count": 707,
+      "bytes": 175666,
+      "counts": {
+        "stay": 541,
+        "education": 40,
+        "food": 54,
+        "tea": 20,
+        "atm": 19,
+        "grocery": 17,
+        "pharmacy": 2,
+        "medical": 9,
+        "police": 4,
+        "transport": 1
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.419Z"
+    },
+    {
+      "id": "almora",
+      "name": "Almora",
+      "count": 310,
+      "bytes": 77961,
+      "counts": {
+        "stay": 144,
+        "education": 36,
+        "food": 44,
+        "fuel": 3,
+        "medical": 20,
+        "pharmacy": 3,
+        "grocery": 21,
+        "tea": 11,
+        "atm": 24,
+        "transport": 2,
+        "police": 2
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.430Z"
+    },
+    {
+      "id": "joshimath",
+      "name": "Joshimath & Auli",
+      "count": 150,
+      "bytes": 36864,
+      "counts": {
+        "medical": 2,
+        "fuel": 2,
+        "stay": 117,
+        "education": 8,
+        "atm": 7,
+        "food": 6,
+        "grocery": 3,
+        "police": 2,
+        "tea": 3
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.436Z"
+    },
+    {
+      "id": "badrinath",
+      "name": "Badrinath",
+      "count": 52,
+      "bytes": 12876,
+      "counts": {
+        "stay": 47,
+        "atm": 2,
+        "food": 2,
+        "education": 1
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.438Z"
+    },
+    {
+      "id": "kedarnath",
+      "name": "Kedarnath trek",
+      "count": 22,
+      "bytes": 6040,
+      "counts": {
+        "food": 2,
+        "stay": 17,
+        "police": 1,
+        "grocery": 1,
+        "atm": 1
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.441Z"
+    },
+    {
+      "id": "dehradun",
+      "name": "Dehradun",
+      "count": 5657,
+      "bytes": 1496669,
+      "counts": {
+        "food": 983,
+        "education": 806,
+        "grocery": 475,
+        "atm": 455,
+        "pharmacy": 157,
+        "stay": 1244,
+        "medical": 1067,
+        "tea": 338,
+        "police": 34,
+        "fuel": 50,
+        "transport": 45,
+        "pan": 3
+      },
+      "release": "2026-10-21.0",
+      "builtAt": "2026-11-17T19:29:33.652Z"
+    }
+  ]
+}

@@ -31,6 +31,15 @@ There's no server, no account and no tracking. Everything is stored on the phone
 
 **Categories:** 🌿 Paan & Kiosks · 🛒 Stores & Grocery · ☕ Tea & Cafe · 🍛 Food · 💊 Pharmacy · 🏧 ATM & Bank · 🏥 Hospital & Clinic · 🚻 Toilets · 🚰 Drinking Water · 🛏️ Hotels · 🚉 Bus, Train & Taxi · ⛽ Fuel · 👮 Police
 
+## City packs (Uttarakhand)
+
+`packs/*.json` hold extra places for popular destinations, built from [Overture Maps Places](https://docs.overturemaps.org/guides/places/) (CDLA-Permissive-2.0). They ship inside the app; saving a pack merges them with OpenStreetMap and removes duplicates.
+
+- Destinations, centres and radii: `src/js/packs.js` (`PACKS`); category mapping and de-duplication live there too.
+- Rebuild: `pip install pyarrow && node scripts/packs/build-packs.mjs [id ...]`. It reads only the relevant parts of Overture's Parquet files (seconds per city).
+- The **City packs** GitHub Action rebuilds them monthly and commits changes.
+- To add a state or city, add entries to `PACKS` and rebuild.
+
 ## Development
 
 Requires Node.js 20+.

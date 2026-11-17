@@ -32,6 +32,9 @@ for (const [family, weights] of Object.entries(FONTS)) {
   await cp(join(dir, 'LICENSE'), join(out, 'fonts', `${family}-LICENSE.txt`));
 }
 
+// City packs (extra places from Overture Maps) ship inside the app.
+await cp(join(root, 'packs'), join(out, 'packs'), { recursive: true }).catch(() => {});
+
 // MapLibre GL (map renderer). The main module loads its worker from the same folder.
 const maplibre = join(root, 'node_modules', 'maplibre-gl', 'dist');
 await mkdir(join(out, 'vendor', 'maplibre'), { recursive: true });
@@ -70,7 +73,7 @@ if (android) {
   process.exit(0);
 }
 
-const files = (await walk(out)).map((f) => relative(out, f).split(sep).join('/')).filter((f) => !f.startsWith('.')).sort();
+const files = (await walk(out)).map((f) => relative(out, f).split(sep).join('/')).filter((f) => !f.startsWith('.') && !f.startsWith('packs/')).sort();
 const hash = createHash('sha256');
 for (const f of files) hash.update(f).update(await readFile(join(out, f)));
 const version = `${pkg.version}-${hash.digest('hex').slice(0, 10)}`;

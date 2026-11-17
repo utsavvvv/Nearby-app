@@ -8,9 +8,9 @@ export function sanitizePlace(p) {
   if (!p || typeof p !== 'object') return null;
   const lat = num(p.lat); const lon = num(p.lon);
   if (lat == null || lon == null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  if (typeof p.id !== 'string' || !/^(osm|user):[\w/.-]{1,80}$/.test(p.id)) return null;
+  if (typeof p.id !== 'string' || !/^(osm|user|ovt):[\w/.-]{1,80}$/.test(p.id)) return null;
   if (!CATEGORY_BY_ID[p.cat]) return null;
-  const source = p.id.startsWith('user:') ? 'user' : 'osm';
+  const source = p.id.startsWith('user:') ? 'user' : p.id.startsWith('ovt:') ? 'ovt' : 'osm';
   return {
     id: p.id,
     source,

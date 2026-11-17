@@ -647,3 +647,34 @@ test('download shows a progress bar; route sheet can start navigation', async ({
   await panel.getByRole('button', { name: /End navigation/i }).click();
   await expect(panel).not.toHaveClass(/nav-mode/);
 });
+
+test('Uttarakhand city packs: save one, big ones need Pro, town search suggests a pack', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  const packs = page.locator('#packs');
+  await expect(packs.locator('[data-pack]')).toHaveCount(9);
+  await expect(packs.locator('[data-pack=rishikesh]')).toContainText(/\+[\d,]+ places/);
+  await expect(packs.locator('[data-pack=dehradun]')).toContainText('pro');
+
+  // Big pack on the free version: Pro dialog.
+  await packs.getByRole('button', { name: 'Save Dehradun pack' }).click();
+  await expect(page.locator('#proReason')).toContainText('Dehradun pack covers 10 km');
+  await page.getByRole('button', { name: 'Not now' }).click();
+
+  // Town search offers the pack.
+  await page.locator('#placeQuery').fill('Rishikesh');
+  await page.getByRole('button', { name: 'Find' }).click();
+  await expect(page.locator('#townResult')).toContainText('Rishikesh city pack');
+
+  // Save the Rishikesh pack: OpenStreetMap places plus the real Overture extras.
+  await page.locator('#townResult').getByRole('button', { name: /Save pack/ }).click();
+  await expect(page.locator('#dlStatus')).toContainText(/extra from the city pack/, { timeout: 30000 });
+  await expect(packs.locator('[data-pack=rishikesh]')).toContainText('saved ✓');
+  await expect(page.locator('#regions')).toContainText('Rishikesh');
+
+  // Pack places show up in the list, marked with their source.
+  await page.getByRole('button', { name: 'Nearby', exact: true }).click();
+  await page.locator('#search').fill('ganga');
+  await page.locator('.place-main').first().click();
+  await expect(page.locator('.place.open')).toContainText(/from (Overture Maps|OpenStreetMap)/);
+});

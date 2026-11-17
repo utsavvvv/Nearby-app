@@ -9,6 +9,7 @@ import { sanitizePlace, sanitizeRegion } from './model.js';
 import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache, downloadAreaMap, removeAreaMap } from './map.js';
 import { isNative, openExternal, saveTextFile } from './platform.js';
 import { hotelUrl, areaHotelsUrl } from './hotels.js';
+import { PACKS, PACK_BY_ID, mergePlaces } from './packs.js';
 import { ProStore } from './pro.js';
 import { getTheme, setTheme, onThemeChange } from './theme.js';
 import {
@@ -289,7 +290,7 @@ function placeItem(p) {
         ${p.localName ? `<p><span>🔤</span><span>${esc(p.localName)}</span></p>` : ''}
         ${p.note ? `<p><span>📝</span><span>${esc(p.note)}</span></p>` : ''}
         ${p.phone ? `<p><span>📞</span><a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a></p>` : ''}
-        <p class="muted small"><span>📌</span><span>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${p.source === 'user' ? ' · added by you' : ''}</span></p>
+        <p class="muted small"><span>📌</span><span>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · ${p.source === 'user' ? 'added by you' : p.source === 'ovt' ? 'from Overture Maps' : 'from OpenStreetMap'}</span></p>
       </div>
       <button class="btn lime big" data-act="route">🧭 Offline route${hasPos ? ` (${formatDistance(p.d)})` : ''}</button>
       <div class="btn-row nowrap">
@@ -747,10 +748,14 @@ function setProgress(label, fraction) {
   $('#dlProgressBar').style.width = `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
 }
 
-async function downloadArea(lat, lon, label) {
+/**
+ * Save an area for offline use: places, roads and the map.
+ * opts.radius overrides the radius picker; opts.packId adds that city pack's extra places.
+ */
+async function downloadArea(lat, lon, label, opts = {}) {
   if (state.download) { toast('A download is already running'); return false; }
   if (!navigator.onLine) { toast('You are offline. Connect to the internet to save an area.'); return false; }
-  const radius = Number($('#radius').value);
+  const radius = opts.radius ?? Number($('#radius').value);
   const id = `r:${lat.toFixed(3)},${lon.toFixed(3)},${radius}`;
   const limits = pro.limits();
   if (radius > limits.maxRadius) { showPro(`Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`); return false; }
@@ -766,8 +771,23 @@ async function downloadArea(lat, lon, label) {
   status.textContent = `Downloading places within ${radius / 1000} km… this can take a minute or two.`;
   setProgress('Saving places…', 0.08);
   try {
-    const places = await fetchPlaces(lat, lon, radius, id, { signal: ctrl.signal });
-    const region = { id, lat, lon, radius, name: label || `Area at ${lat.toFixed(3)}, ${lon.toFixed(3)}`, count: places.length, savedAt: Date.now() };
+    let places = await fetchPlaces(lat, lon, radius, id, { signal: ctrl.signal });
+    let extra = 0;
+    if (opts.packId) {
+      // City pack: extra places from Overture Maps, shipped with the app.
+      try {
+        const pack = await (await fetch(`packs/${opts.packId}.json`)).json();
+        const merged = mergePlaces(places, (pack.places || []).map((p) => sanitizePlace({ ...p, regionId: id })).filter(Boolean));
+        places = merged.places;
+        extra = merged.added;
+      } catch (err) {
+        console.warn('pack', err);
+      }
+    }
+    const region = {
+      id, lat, lon, radius, name: label || `Area at ${lat.toFixed(3)}, ${lon.toFixed(3)}`, count: places.length, savedAt: Date.now(),
+      ...(opts.packId ? { packId: opts.packId, extra } : {}),
+    };
     await db.saveRegion(region, places);
     await loadData();
     requestPersistentStorage();
@@ -796,7 +816,7 @@ async function downloadArea(lat, lon, label) {
     }
     await loadData();
     status.textContent = (places.length
-      ? `Saved ${places.length} places${roadsNote ? '' : ', roads'}${mapNote ? '' : ' and the map'} for offline use. ✅`
+      ? `Saved ${places.length} places${extra ? ` (${extra} extra from the city pack)` : ''}${roadsNote ? '' : ', roads'}${mapNote ? '' : ' and the map'} for offline use. ✅`
       : 'Saved, but no places were found here. Try a bigger radius, or add places yourself with ＋.') + roadsNote + mapNote;
     toast(places.length ? `Saved ${places.length} places — works offline now` : 'No places found in this area');
     return true;
@@ -839,8 +859,13 @@ async function searchTown(e) {
   // "school", "ATM", "chemist"... means "find these near me", not a town name.
   const cat = categoryForQuery(q);
   if (cat) { await findCategoryNearMe(cat, box); return; }
-  if (!navigator.onLine) { box.innerHTML = '<p class="muted small">Town search needs internet.</p>'; return; }
+  // A city pack for this town? Offer it first (more places than a plain save).
+  const pack = PACKS.find((p) => p.name.toLowerCase().includes(q.toLowerCase()) || q.toLowerCase().includes(p.id));
+  const packHtml = pack ? `<div class="town-hint">🏔️ <b>${esc(pack.name)} city pack</b>: places, roads and the map, plus ${packIndex?.[pack.id]?.count ? `${packIndex[pack.id].count.toLocaleString('en-IN')} ` : ''}extra places from Overture Maps.
+    <button class="btn small lime" data-pack-save="${pack.id}">⬇ Save pack</button></div>` : '';
+  if (!navigator.onLine) { box.innerHTML = packHtml + '<p class="muted small">Town search needs internet.</p>'; return; }
   await showTowns(q, box, false);
+  if (packHtml) box.insertAdjacentHTML('afterbegin', packHtml);
 }
 
 /** Show places of one category around the user, saving their area first if needed. */
@@ -932,6 +957,7 @@ async function findTowns(q, cc) {
 
 const PACK_ICONS = ['🏛️', '🛍️', '🍜', '🛕', '🏞️', '🚉'];
 async function renderRegions() {
+  renderPacks();
   const ul = $('#regions');
   const userCount = state.places.filter((p) => p.source === 'user').length;
   const staleMs = STALE_AFTER_DAYS * 86400000;
@@ -964,6 +990,37 @@ async function renderRegions() {
   try { if (navigator.storage?.estimate) mb = (await navigator.storage.estimate()).usage / 1048576; } catch { /* ignore */ }
   $('#storage').textContent = `${files} map files saved for offline viewing.${mb != null ? ` Storage used: about ${mb.toFixed(1)} MB.` : ''}`;
   $('#storageSticker').textContent = mb != null ? `${mb.toFixed(1)} MB used` : `${files} map files`;
+}
+
+// ---------- city packs ----------
+let packIndex = null; // counts per pack, from packs/index.json (shipped with the app)
+async function loadPackIndex() {
+  try { packIndex = Object.fromEntries((await (await fetch('packs/index.json')).json()).packs.map((p) => [p.id, p])); } catch { packIndex = {}; }
+  renderPacks();
+}
+
+function renderPacks() {
+  const ul = $('#packs');
+  if (!ul) return;
+  ul.innerHTML = PACKS.map((p) => {
+    const saved = state.regions.find((r) => r.packId === p.id);
+    const info = packIndex?.[p.id];
+    const needsPro = p.radius > FREE_MAX_RADIUS && !pro.active;
+    return `<li class="pack-row" data-pack="${p.id}">
+      <div class="grow"><b>${esc(p.name)}</b>${needsPro ? ' <span class="sticker orange flat mini">pro</span>' : ''}${saved ? ' <span class="sticker lime flat mini">saved ✓</span>' : ''}
+        <span class="muted small">${esc(p.blurb)} · ${p.radius / 1000} km${info?.count ? ` · +${info.count.toLocaleString('en-IN')} places` : ''}</span></div>
+      <button class="btn small ${saved ? 'soft' : 'lime'}" data-pack-save="${p.id}" aria-label="${saved ? 'Update' : 'Save'} ${esc(p.name)} pack">${saved ? '↻' : '⬇ Save'}</button>
+    </li>`;
+  }).join('');
+}
+
+function savePack(id) {
+  const p = PACK_BY_ID[id];
+  if (!p) return;
+  if (p.radius > pro.limits().maxRadius) { showPro(`The ${p.name} pack covers ${p.radius / 1000} km. Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`); return; }
+  showView('areas');
+  $('#dlStatus').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  downloadArea(p.lat, p.lon, p.name, { radius: p.radius, packId: p.id });
 }
 
 // ---------- add / delete user places ----------
@@ -1020,7 +1077,7 @@ async function importData(file) {
     if (data?.app !== 'nearby-offline' || !Array.isArray(data.places)) throw new Error('this is not a Nearby Offline export file');
     const places = data.places.map(sanitizePlace).filter(Boolean);
     const regions = (Array.isArray(data.regions) ? data.regions : []).map(sanitizeRegion).filter(Boolean);
-    for (const r of regions) await db.saveRegion(r, places.filter((p) => p.source === 'osm' && p.regionId === r.id));
+    for (const r of regions) await db.saveRegion(r, places.filter((p) => p.source !== 'user' && p.regionId === r.id));
     for (const p of places.filter((x) => x.source === 'user')) await db.put('places', p);
     await loadData();
     toast(`Imported ${regions.length} areas and ${places.length} places`);
@@ -1236,6 +1293,14 @@ function bindEvents() {
     }
     renderRadiusTiles();
   });
+  $('#packs').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-pack-save]')?.dataset.packSave;
+    if (id) savePack(id);
+  });
+  $('#townResult').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-pack-save]')?.dataset.packSave;
+    if (id) savePack(id);
+  });
   $('#radiusTiles').addEventListener('click', (e) => {
     const t = e.target.closest('[data-radius]');
     if (!t) return;
@@ -1350,6 +1415,7 @@ window.addEventListener('unhandledrejection', (e) => { console.error(e.reason); 
 async function main() {
   $('#addCat').innerHTML = CATEGORIES.map((c) => `<label class="cat-opt"><input type="radio" name="cat" value="${c.id}" required><span>${c.icon} ${esc(c.label)}</span></label>`).join('');
   renderRadiusTiles();
+  loadPackIndex();
   if (!loadPref('onboarded', false)) showOnboarding(0);
   $('#supportLink').href = SUPPORT_URL;
   updateNet();

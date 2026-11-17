@@ -1,0 +1,40 @@
+name: City packs
+
+# Rebuilds the Uttarakhand city packs (packs/*.json) from the latest Overture Maps Places release
+# and commits them to the branch it runs on. Runs monthly, or by hand from the Actions tab.
+on:
+  schedule:
+    - cron: '17 3 2 * *' # 03:17 UTC on the 2nd of every month
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: packs-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyarrow
+      - run: npm ci
+      - run: npm test
+      - run: node scripts/packs/build-packs.mjs
+      - name: Commit updated packs
+        run: |
+          if git diff --quiet -- packs; then echo "Packs unchanged"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packs
+          git commit -m "Update city packs from Overture Maps"
+          git push
