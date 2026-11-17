@@ -60,3 +60,17 @@ test('can be cancelled', async () => {
   ctrl.abort(new Error('user cancelled'));
   await assert.rejects(p, /user cancelled/);
 });
+
+test('unnamed places get a name from their brand or operator', async () => {
+  const { brandName } = await import('../../src/js/overpass.js');
+  const places = toPlaces([
+    { type: 'node', id: 10, lat: 1, lon: 1, tags: { amenity: 'atm', operator: 'State Bank of India' } },
+    { type: 'node', id: 11, lat: 1, lon: 1, tags: { amenity: 'atm', brand: 'HDFC Bank ATM' } },
+    { type: 'node', id: 12, lat: 1, lon: 1, tags: { amenity: 'pharmacy', brand: 'Apollo Pharmacy' } },
+    { type: 'node', id: 13, lat: 1, lon: 1, tags: { amenity: 'fuel', brand: 'Indian Oil' } },
+    { type: 'node', id: 14, lat: 1, lon: 1, tags: { amenity: 'atm', name: 'Named ATM', operator: 'X' } },
+    { type: 'node', id: 15, lat: 1, lon: 1, tags: { shop: 'kiosk' } },
+  ], 'r');
+  assert.deepEqual(places.map((p) => p.name), ['State Bank of India ATM', 'HDFC Bank ATM', 'Apollo Pharmacy', 'Indian Oil petrol pump', 'Named ATM', '']);
+  assert.equal(brandName({ amenity: 'bank', operator: 'Canara' }, 'atm'), 'Canara Bank');
+});

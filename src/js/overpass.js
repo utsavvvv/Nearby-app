@@ -70,6 +70,19 @@ async function overpass(query, { signal, endpoints, timeoutMs }) {
 
 const clip = (s, n = 200) => (typeof s === 'string' ? s.slice(0, n) : '');
 
+/**
+ * Many places in OpenStreetMap have no name but do say who runs them, e.g. an ATM with
+ * operator=State Bank of India or a chemist with brand=Apollo Pharmacy. Use that as the name.
+ */
+export function brandName(tags, cat) {
+  const who = tags['brand:en'] || tags.brand || tags['operator:en'] || tags.operator || tags['network:en'] || tags.network || '';
+  if (!who) return '';
+  if (tags.amenity === 'atm' && !/\batm\b/i.test(who)) return `${who} ATM`;
+  if (tags.amenity === 'bank' && !/bank/i.test(who)) return `${who} Bank`;
+  if (cat === 'fuel' && !/petrol|pump|fuel/i.test(who)) return `${who} petrol pump`;
+  return who;
+}
+
 export function toPlaces(elements, regionId) {
   const places = [];
   for (const el of elements) {
@@ -86,7 +99,7 @@ export function toPlaces(elements, regionId) {
       lat,
       lon,
       cat,
-      name: clip(enName || tags.name, 120),
+      name: clip(enName || tags.name || brandName(tags, cat), 120),
       localName: enName && tags.name && tags.name !== enName ? clip(tags.name, 120) : '',
       hours: clip(tags.opening_hours),
       phone: clip(tags.phone || tags['contact:phone'], 60),
