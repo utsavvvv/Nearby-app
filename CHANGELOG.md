@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.0
+
+- Map shows which way you're facing: a blue beam on your location dot (like Google Maps), from the
+  phone's compass while the Map tab is open, or the GPS direction of travel when moving fast.
+  Fixed: newer Chrome/WebView versions need a sensor permission request, which blocked the compass.
+- The centre crosshair only shows after you drag the map.
+
 ## 2.1.0
 
 - 🏔️ Uttarakhand city packs: Rishikesh, Haridwar, Mussoorie, Nainital, Almora, Joshimath & Auli,

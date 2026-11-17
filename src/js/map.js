@@ -256,14 +256,26 @@ export class PlaceMap {
 
   setMe(lat, lon, accuracyMeters) {
     if (!this.me) {
+      // Blue dot with a "beam" showing which way the phone faces (like Google Maps).
       const el = document.createElement('div');
-      el.className = 'me-dot';
+      el.className = 'me-wrap';
       el.title = 'You are here';
+      el.innerHTML = '<div class="me-cone" hidden></div><div class="me-dot"></div>';
+      this.cone = el.querySelector('.me-cone');
       this.me = new maplibregl.Marker({ element: el }).setLngLat([lon, lat]).addTo(this.map);
+      if (this.heading != null) this.setHeading(this.heading);
     } else {
       this.me.setLngLat([lon, lat]);
     }
     this.setAccuracy(lat, lon, accuracyMeters);
+  }
+
+  /** Point the beam: degrees clockwise from north, or null to hide it. */
+  setHeading(deg) {
+    this.heading = deg;
+    if (!this.cone) return;
+    this.cone.hidden = deg == null;
+    if (deg != null) this.cone.style.transform = `rotate(${Math.round(deg)}deg)`;
   }
 
   /** Draw a route: { coords: [[lon, lat], ...], straight: boolean }, or null to clear. */

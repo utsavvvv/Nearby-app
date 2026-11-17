@@ -678,3 +678,32 @@ test('Uttarakhand city packs: save one, big ones need Pro, town search suggests 
   await page.locator('.place-main').first().click();
   await expect(page.locator('.place.open')).toContainText(/from (Overture Maps|OpenStreetMap)/);
 });
+
+test('map shows which way the phone faces (heading beam)', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation', 'accelerometer', 'gyroscope', 'magnetometer']);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await expect(page.locator('.me-dot')).toBeVisible();
+  const cone = page.locator('.me-cone');
+  await expect(cone).toBeHidden(); // no compass reading yet
+
+  // The phone's compass sensor reports a heading (alpha 270 => facing east, 90°).
+  const turn = (alpha) => page.evaluate((a) => {
+    const type = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+    for (let i = 0; i < 12; i++) window.dispatchEvent(new DeviceOrientationEvent(type, { alpha: a, beta: 0, gamma: 0, absolute: true }));
+  }, alpha);
+  await turn(270);
+  await expect(cone).toBeVisible();
+  await expect.poll(async () => Number((await cone.evaluate((el) => el.style.transform)).match(/-?\d+/)[0])).toBeGreaterThan(80);
+  await expect.poll(async () => Number((await cone.evaluate((el) => el.style.transform)).match(/-?\d+/)[0])).toBeLessThan(100);
+
+  // Turn to face south-west (225°).
+  await turn(135);
+  await expect.poll(async () => Number((await cone.evaluate((el) => el.style.transform)).match(/-?\d+/)[0])).toBeGreaterThan(215);
+
+  // Leaving the map stops listening (saves battery).
+  await page.getByRole('button', { name: 'Nearby', exact: true }).click();
+  await turn(0);
+  const after = await cone.evaluate((el) => el.style.transform);
+  expect(after).toMatch(/rotate\(2[1-3]\d/);
+});

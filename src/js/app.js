@@ -113,6 +113,7 @@ function startGps() {
     (g) => {
       const prev = state.pos;
       state.pos = { lat: g.coords.latitude, lon: g.coords.longitude, acc: g.coords.accuracy, ts: Date.now() };
+      if (Number.isFinite(g.coords.heading) && g.coords.speed > 2) { gpsHeading = g.coords.heading; gpsHeadingAt = Date.now(); applyMapHeading(); }
       savePref('lastPos', state.pos);
       updateLocStatus();
       // Only re-render if we moved noticeably, to keep scrolling smooth.
@@ -145,6 +146,51 @@ function onOrientation(e) {
   const screenAngle = (screen.orientation && screen.orientation.angle) || 0;
   state.heading = (h + screenAngle + 360) % 360;
   scheduleArrowUpdate();
+}
+
+// ---- heading beam on the map (like Google Maps) ----
+// While the Map tab is open, listen to the compass sensor (no permission needed on Android).
+// When moving fast (driving), the GPS direction of travel is more reliable, so prefer that.
+let mapHeading = null; let mapHeadingAt = 0; let gpsHeading = null; let gpsHeadingAt = 0;
+let headingListening = false;
+function onMapOrientation(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
+  else if (e.absolute && typeof e.alpha === 'number') h = 360 - e.alpha;
+  if (h == null) return;
+  h = (h + ((screen.orientation && screen.orientation.angle) || 0) + 360) % 360;
+  // Smooth small jitters (shortest way round the circle).
+  if (mapHeading == null) mapHeading = h;
+  else mapHeading = (mapHeading + ((((h - mapHeading) % 360) + 540) % 360 - 180) * 0.35 + 360) % 360;
+  mapHeadingAt = Date.now();
+  applyMapHeading();
+}
+function applyMapHeading() {
+  if (!map) return;
+  const moving = gpsHeading != null && Date.now() - gpsHeadingAt < 5000;
+  const sensor = mapHeading != null && Date.now() - mapHeadingAt < 3000 ? mapHeading : null;
+  map.setHeading(moving ? gpsHeading : sensor);
+}
+let headingAllowed = null; // null = not asked yet
+function listenHeading(on) {
+  const type = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+  if (!on) {
+    if (headingListening) window.removeEventListener(type, onMapOrientation);
+    headingListening = false;
+    return;
+  }
+  if (headingListening) return;
+  const attach = () => { if (state.view === 'map' && !headingListening) { window.addEventListener(type, onMapOrientation); headingListening = true; } };
+  // Newer browsers (iOS Safari, recent Chrome) want permission first. Called from a tap on the
+  // Map tab, so it's allowed to ask; Android grants it without a prompt.
+  const ask = typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission;
+  if (typeof ask === 'function' && headingAllowed == null) {
+    // Listen whatever the answer: if the sensor is really blocked no readings arrive, and some
+    // Android WebViews answer "denied" while still delivering them.
+    ask.call(DeviceOrientationEvent).then((r) => { headingAllowed = r === 'granted' ? true : 'unknown'; }, () => {}).finally(attach);
+    return;
+  }
+  attach();
 }
 
 let compassOn = false;
@@ -422,6 +468,8 @@ function initMap() {
     if (!webglSupported()) throw new Error('WebGL not available');
     map = new PlaceMap($('#map'), { center: start, zoom: state.pos ? 16 : 13 });
     map.on('moveend', renderMarkers);
+    // The centre crosshair (for "set my location here" / dropping a pin) only after the user pans.
+    map.on('dragstart', () => $('#view-map').classList.add('panned'));
     map.on('error', (e) => console.warn('map:', e.error?.message || e));
     updateMeMarker();
   } catch (err) {
@@ -709,12 +757,14 @@ function centreMap(target) {
   } else if (state.pos) {
     map.setView([state.pos.lat, state.pos.lon], Math.max(map.getZoom(), 15));
     map.userMoved = false;
+    $('#view-map').classList.remove('panned');
   }
   renderMarkers();
 }
 
 function showView(view, mapTarget) {
   state.view = view;
+  listenHeading(view === 'map');
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
   document.querySelectorAll('.tabs [data-view]').forEach((b) => {
     const on = b.dataset.view === view;
@@ -1366,7 +1416,7 @@ function bindEvents() {
   });
 
   $('#recenterBtn').addEventListener('click', () => {
-    if (state.pos) { map?.setView([state.pos.lat, state.pos.lon], 16); if (map) map.userMoved = false; }
+    if (state.pos) { map?.setView([state.pos.lat, state.pos.lon], 16); if (map) map.userMoved = false; $('#view-map').classList.remove('panned'); }
     else toast('No location yet');
   });
   $('#setHereBtn').addEventListener('click', () => {
