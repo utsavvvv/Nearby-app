@@ -13,6 +13,23 @@ export const ROAD_TYPES = [
   'pedestrian', 'footway', 'path', 'steps', 'cycleway',
 ];
 
+// Typical driving speeds (km/h) by road type in Indian towns and cities. Used to prefer main
+// roads like an online router does, and for time estimates. Links (ramps) are a bit slower.
+export const DRIVE_SPEED = {
+  motorway: 70, trunk: 55, primary: 40, secondary: 32, tertiary: 26, unclassified: 20,
+  residential: 16, living_street: 10, service: 10, road: 15, track: 10,
+};
+const WALK_SPEED = 4.8; // km/h
+export const GRAPH_VERSION = 2;
+
+function driveSpeed(t) {
+  const base = DRIVE_SPEED[t.highway.replace(/_link$/, '')] ?? 15;
+  let v = t.highway.endsWith('_link') ? base * 0.8 : base;
+  const limit = parseInt(t.maxspeed, 10);
+  if (limit > 0) v = Math.min(v, limit);
+  return Math.max(5, Math.round(v));
+}
+
 const WALK = 1;
 const DRIVE = 2;
 const NO = new Set(['no', 'private']);
@@ -50,7 +67,7 @@ export function buildGraph(elements) {
 
   const index = new Map(); // OSM node id -> graph index
   const lat = []; const lon = [];
-  const from = []; const to = []; const flags = [];
+  const from = []; const to = []; const flags = []; const speeds = [];
   const idx = (id) => {
     let i = index.get(id);
     if (i === undefined) {
@@ -71,11 +88,12 @@ export function buildGraph(elements) {
     const ow = d ? oneway(t) : 0;
     const fwd = (w ? WALK : 0) | (d && ow !== -1 ? DRIVE : 0);
     const back = (w ? WALK : 0) | (d && ow !== 1 ? DRIVE : 0);
+    const kmh = d ? driveSpeed(t) : 0;
     for (let k = 1; k < el.nodes.length; k++) {
       const a = idx(el.nodes[k - 1]); const b = idx(el.nodes[k]);
       if (a < 0 || b < 0 || a === b) continue;
-      if (fwd) { from.push(a); to.push(b); flags.push(fwd); }
-      if (back) { from.push(b); to.push(a); flags.push(back); }
+      if (fwd) { from.push(a); to.push(b); flags.push(fwd); speeds.push(kmh); }
+      if (back) { from.push(b); to.push(a); flags.push(back); speeds.push(kmh); }
     }
   }
 
@@ -87,12 +105,17 @@ export function buildGraph(elements) {
   const fill = offsets.slice(0, n);
   const targets = new Uint32Array(from.length);
   const edgeFlags = new Uint8Array(from.length);
+  const edgeSpeeds = new Uint8Array(from.length);
   for (let e = 0; e < from.length; e++) {
     const p = fill[from[e]]++;
     targets[p] = to[e];
     edgeFlags[p] = flags[e];
+    edgeSpeeds[p] = speeds[e];
   }
-  return { version: 1, count: n, lat: Float64Array.from(lat), lon: Float64Array.from(lon), offsets, targets, flags: edgeFlags };
+  return {
+    version: GRAPH_VERSION, count: n, lat: Float64Array.from(lat), lon: Float64Array.from(lon),
+    offsets, targets, flags: edgeFlags, speeds: edgeSpeeds,
+  };
 }
 
 // Flat-earth distance around the graph's latitude: accurate to well under 1% across a city,
@@ -165,9 +188,11 @@ class Heap {
 }
 
 /**
- * Shortest path between two points along the roads, or null if there is none.
+ * Best path between two points along the roads, or null if there is none.
+ * Walking: the shortest path. Driving: the fastest, using each road type's typical speed,
+ * so main roads are preferred over lanes (like an online router).
  * Includes the short off-road bits from each point to the nearest road.
- * @returns {{coords:number[][], distance:number} | null}
+ * @returns {{coords:number[][], distance:number, duration:number} | null}
  */
 export function shortestPath(g, start, end, mode = 'walk') {
   if (!g?.count) return null;
@@ -175,13 +200,19 @@ export function shortestPath(g, start, end, mode = 'walk') {
   const t = nearestNode(g, end.lat, end.lon, mode);
   if (!s || !t) return null;
   const m = MODE[mode];
+  const drive = mode === 'drive';
   const n = g.count;
-  const gScore = new Float64Array(n).fill(Infinity);
+  // Cost is seconds. Older saved graphs (v1) have no speeds: assume 20 km/h everywhere.
+  const speedOf = (e) => (drive ? (g.speeds?.[e] || 20) : WALK_SPEED) / 3.6;
+  let maxSpeed = WALK_SPEED / 3.6;
+  if (drive) { maxSpeed = 20 / 3.6; if (g.speeds) for (const v of g.speeds) maxSpeed = Math.max(maxSpeed, v / 3.6); }
+  const cost = new Float64Array(n).fill(Infinity);
+  const len = new Float64Array(n);
   const prev = new Int32Array(n).fill(-1);
   const done = new Uint8Array(n);
   const heap = new Heap();
-  gScore[s.node] = 0;
-  heap.push(dist(g, s.node, t.node), s.node);
+  cost[s.node] = 0;
+  heap.push(dist(g, s.node, t.node) / maxSpeed, s.node);
   while (heap.size) {
     const u = heap.pop();
     if (done[u]) continue;
@@ -191,20 +222,25 @@ export function shortestPath(g, start, end, mode = 'walk') {
       if (!(g.flags[e] & m)) continue;
       const v = g.targets[e];
       if (done[v]) continue;
-      const cand = gScore[u] + dist(g, u, v);
-      if (cand < gScore[v]) {
-        gScore[v] = cand;
+      const d = dist(g, u, v);
+      const cand = cost[u] + d / speedOf(e);
+      if (cand < cost[v]) {
+        cost[v] = cand;
+        len[v] = len[u] + d;
         prev[v] = u;
-        heap.push(cand + dist(g, v, t.node), v);
+        heap.push(cand + dist(g, v, t.node) / maxSpeed, v);
       }
     }
   }
-  if (gScore[t.node] === Infinity) return null;
+  if (cost[t.node] === Infinity) return null;
   const path = [];
   for (let v = t.node; v !== -1; v = prev[v]) path.push([g.lon[v], g.lat[v]]);
   path.reverse();
+  // The bits between the points and the road are on foot / slow.
+  const offRoad = s.distance + t.distance;
   return {
     coords: [[start.lon, start.lat], ...path, [end.lon, end.lat]],
-    distance: s.distance + gScore[t.node] + t.distance,
+    distance: offRoad + len[t.node],
+    duration: cost[t.node] + offRoad / (WALK_SPEED / 3.6),
   };
 }

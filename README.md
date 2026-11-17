@@ -21,7 +21,7 @@ There's no server, no account and no tracking. Everything is stored on the phone
 | Category filters & search | No |
 | Add your own places (e.g. an unmapped pan shop) | No |
 | Export / import places as a file (backup, share with friends) | No |
-| Street map with markers (OpenFreeMap) | Areas you've viewed online are cached for offline use |
+| Street map with markers (OpenFreeMap) | No: saved areas include the full map at every zoom level |
 | 🧭 Route: blue line to any place, Walk / Drive, shortest path on saved roads | No (areas saved with roads) |
 | Turn-by-turn voice directions | Hands off to Google Maps |
 | Light / Dark / System appearance | No |

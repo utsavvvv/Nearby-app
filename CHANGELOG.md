@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0
+
+- Offline map at every zoom level: saving an area now downloads its whole street map (zoom 0–14;
+  closer zooms reuse 14), so zooming in offline no longer shows white squares. Areas saved
+  earlier get their map automatically when online. Deleting an area removes its map data.
+- Missing map squares outside saved areas keep showing the less detailed map instead of white.
+- Driving routes now prefer main roads (fastest by road type: primary 40 km/h, residential
+  16 km/h, etc., respecting speed limits), like an online router; times use those speeds.
+  Saved roads are refreshed to the new format automatically when online.
+
 ## 1.4.1
 
 - Routes follow the roads offline in more cases:

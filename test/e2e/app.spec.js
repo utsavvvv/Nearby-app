@@ -100,7 +100,7 @@ async function routeBluePixels(page) {
 async function saveArea(page) {
   await page.goto('/');
   await page.getByRole('button', { name: /Save area around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places and roads');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places, roads and the map');
   await page.getByRole('button', { name: 'Nearby' }).click();
 }
 
@@ -144,7 +144,7 @@ test('works fully offline after the first visit', async ({ page, context }) => {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.place', { hasText: 'Tea stall by the ghat' })).toContainText('added by you');
 
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page.locator('.pin').first()).toBeVisible();
   await expect(page.locator('.map-fallback')).toHaveCount(0);
 });
@@ -153,7 +153,7 @@ test('map shows places and keeps map data for offline use', async ({ page, conte
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await saveArea(page);
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
   // Street zoom: only places in view get markers.
   await expect(page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]')).toBeVisible();
@@ -161,7 +161,11 @@ test('map shows places and keeps map data for offline use', async ({ page, conte
   await expect(page.locator('.me-dot')).toBeVisible();
 
   // Map files are cached, with the weekly version stripped from tile keys.
-  await expect.poll(async () => page.evaluate(async () => (await (await caches.open('nearby-map')).keys()).map((r) => r.url)))
+  await expect.poll(async () => page.evaluate(async () => {
+    const urls = [];
+    for (const name of ['nearby-map', 'nearby-map-areas']) urls.push(...(await (await caches.open(name)).keys()).map((r) => r.url));
+    return urls;
+  }))
     .toEqual(expect.arrayContaining(['https://tiles.openfreemap.org/styles/liberty', expect.stringMatching(/\/planet\/\d+\/\d+\/\d+\.pbf$/)]));
 
   // Tapping a marker shows its details.
@@ -174,7 +178,7 @@ test('map shows places and keeps map data for offline use', async ({ page, conte
   await context.route(/tiles\.openfreemap\.org/, (r) => r.abort('internetdisconnected'));
   await context.setOffline(true);
   await page.reload();
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
   await expect(page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]')).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.querySelector('.maplibregl-canvas')?.width > 0)).toBe(true);
@@ -203,7 +207,7 @@ test('town search offers to save that town', async ({ page }) => {
   await page.getByRole('button', { name: 'Find' }).click();
   await expect(page.locator('#townResult')).not.toContainText('Looking for');
   await page.locator('.town-list').getByRole('button', { name: /Save/ }).first().click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places and roads');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places, roads and the map');
   await expect(page.locator('#regions')).toContainText('Varanasi');
 });
 
@@ -270,7 +274,7 @@ test('free version limits areas and radius, Pro dialog explains', async ({ page,
 
   // Two areas are free; the third asks for Pro.
   await page.getByRole('button', { name: /Around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places and roads');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places, roads and the map');
   await context.setGeolocation({ latitude: 25.4, longitude: 82.9 });
   await page.waitForTimeout(300);
   await page.getByRole('button', { name: /Around me/ }).click();
@@ -399,14 +403,14 @@ test('map opens on my current location', async ({ page, context }) => {
     return Math.abs(d.x + d.width / 2 - (m.x + m.width / 2)) < 20 && Math.abs(d.y + d.height / 2 - (m.y + m.height / 2)) < 20;
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect.poll(meIsCentred).toBe(true);
 
   // Move somewhere else while on another tab; opening the map again centres on the new spot.
   await page.getByRole('button', { name: 'Nearby' }).click();
   await context.setGeolocation({ latitude: 25.36, longitude: 83.02 });
   await expect(page.locator('#locStatus')).toContainText('25.3600');
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect.poll(meIsCentred).toBe(true);
 
   // "Show on map" for a place centres on that place instead.
@@ -433,7 +437,7 @@ test('light, dark and system appearance', async ({ page }) => {
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#134e48');
 
   // The street map itself stays light in dark mode.
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
   await expect.poll(() => styles.includes('liberty')).toBe(true);
   expect(styles).not.toContain('dark');
@@ -459,7 +463,7 @@ test('light, dark and system appearance', async ({ page }) => {
 test('route to a place: shortest path on saved roads, offline', async ({ page, context }) => {
   await saveArea(page);
   await page.getByRole('button', { name: 'Offline areas' }).click();
-  await expect(page.locator('#regions')).toContainText('offline routes ✓');
+  await expect(page.locator('#regions')).toContainText('routes ✓');
   await page.getByRole('button', { name: 'Nearby' }).click();
 
   await context.setOffline(true);
@@ -502,8 +506,9 @@ test('areas saved before roads existed get roads automatically', async ({ page }
   await addOldArea(page);
   await page.reload();
   await page.getByRole('button', { name: 'Offline areas' }).click();
-  await expect(page.locator('#regions')).toContainText('offline routes ✓', { timeout: 15000 });
-  await expect(page.locator('#toast')).toContainText('routes now work offline');
+  await expect(page.locator('#regions')).toContainText('routes ✓', { timeout: 15000 });
+  await expect(page.locator('#regions')).toContainText('map ✓', { timeout: 15000 });
+  await expect(page.locator('#toast')).toContainText('now work offline');
 });
 
 test('route saves the roads it needs when online, then works offline', async ({ page, context }) => {
@@ -544,7 +549,7 @@ test('if roads cannot be downloaded: online routing service, then a straight lin
 
 test('route button in a map marker popup', async ({ page }) => {
   await saveArea(page);
-  await page.getByRole('button', { name: 'Map' }).click();
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
   await page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]').click();
   await page.locator('.maplibregl-popup').getByRole('button', { name: /Route/ }).click();
   await expect(page.locator('#routePanel')).toContainText('Raju Pan Bhandar');
@@ -562,7 +567,40 @@ test('a too-big road download is retried with a smaller area', async ({ page, co
   });
   await saveArea(page);
   await page.getByRole('button', { name: 'Offline areas' }).click();
-  await expect(page.locator('#regions')).toContainText('offline routes ✓');
+  await expect(page.locator('#regions')).toContainText('routes ✓');
   // 3 failed tries at 5 km (one per server), then 2.5 km works.
   expect(radii).toEqual([5000, 5000, 5000, 2500]);
+});
+
+test('saving an area stores its map at every zoom level, so zooming works offline', async ({ page, context }) => {
+  await saveArea(page);
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await expect(page.locator('#regions')).toContainText('map ✓');
+  const zooms = await page.evaluate(async () => {
+    const keys = (await (await caches.open('nearby-map-areas')).keys()).map((r) => r.url);
+    const z = {};
+    for (const k of keys) { const m = k.match(/\/planet\/(\d+)\/\d+\/\d+\.pbf$/); if (m) z[m[1]] = (z[m[1]] || 0) + 1; }
+    return z;
+  });
+  // Every zoom from 0 to 14 (the most detailed; closer zooms reuse 14), with more tiles as it gets closer.
+  expect(Object.keys(zooms).map(Number).sort((a, b) => a - b)).toEqual([...Array(15).keys()]);
+  expect(zooms[14]).toBeGreaterThanOrEqual(16);
+
+  // Offline, zoomed right in: every tile the map asks for is already saved.
+  const missing = [];
+  await context.unroute(/tiles\.openfreemap\.org/);
+  await context.route(/tiles\.openfreemap\.org/, (r) => { missing.push(r.request().url()); return r.abort('internetdisconnected'); });
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  await page.locator('.maplibregl-ctrl-zoom-in').click();
+  await page.locator('.maplibregl-ctrl-zoom-in').click();
+  await page.waitForTimeout(1500);
+  expect(missing).toEqual([]);
+
+  // Deleting the area removes its map files.
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  page.once('dialog', (d) => d.accept());
+  await page.locator('#regions [data-act=del]').click();
+  await expect.poll(() => page.evaluate(async () => (await (await caches.open('nearby-map-areas')).keys()).length)).toBe(0);
 });

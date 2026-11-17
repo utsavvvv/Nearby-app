@@ -2,11 +2,11 @@ import { CATEGORIES, CATEGORY_BY_ID, categoryForQuery } from './categories.js';
 import { distance, bearing, compassPoint, formatDistance, walkTime } from './geo.js';
 import * as db from './db.js';
 import { fetchPlaces, fetchRoads } from './overpass.js';
-import { buildGraph, shortestPath } from './graph.js';
-import { fetchRoute, straightLine, formatDuration, SPEED } from './routing.js';
+import { buildGraph, shortestPath, GRAPH_VERSION } from './graph.js';
+import { fetchRoute, straightLine, formatDuration } from './routing.js';
 import { isOpenAt } from './hours.js';
 import { sanitizePlace, sanitizeRegion } from './model.js';
-import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache } from './map.js';
+import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache, downloadAreaMap, removeAreaMap } from './map.js';
 import { isNative, openExternal, saveTextFile } from './platform.js';
 import { hotelUrl, areaHotelsUrl } from './hotels.js';
 import { ProStore } from './pro.js';
@@ -418,9 +418,22 @@ async function saveRoads(id, lat, lon, radius, signal, minRadius = 1500) {
   }
 }
 
+/** Merge fields into a saved area (re-reading it, so parallel updates don't overwrite each other). */
+async function updateRegion(id, patch) {
+  const current = await db.getOne('regions', id);
+  if (current) await db.put('regions', { ...current, ...patch });
+}
+
 async function saveRegionRoads(region, signal) {
   const roadRadius = await saveRoads(region.id, region.lat, region.lon, region.radius, signal);
-  await db.put('regions', { ...region, roads: true, roadRadius });
+  await updateRegion(region.id, { roads: true, roadRadius, roadsVersion: GRAPH_VERSION });
+}
+
+/** The street map of a saved area at every zoom level, so zooming works offline. */
+async function saveRegionMap(region, signal, onProgress) {
+  const mapKeys = await downloadAreaMap(region.lat, region.lon, region.radius, { signal, onProgress });
+  if (mapKeys.length < 5) throw new Error('map download failed');
+  await updateRegion(region.id, { mapSaved: true, mapKeys });
 }
 
 /** Areas saved before offline routes existed get their roads in the background when online. */
@@ -428,22 +441,27 @@ let upgrading = false;
 const upgradeTried = new Set();
 async function upgradeRoads() {
   if (upgrading || !navigator.onLine) return;
-  const todo = state.regions.filter((r) => !r.roads && !upgradeTried.has(r.id));
+  // Also refresh roads saved in an older format (e.g. without road speeds).
+  // Areas saved by older versions: add roads (or refresh old-format roads) and the full map.
+  const oldRoads = (r) => !r.roads || (r.roadsVersion || 1) < GRAPH_VERSION;
+  const todo = state.regions.filter((r) => (oldRoads(r) || !r.mapSaved) && !upgradeTried.has(r.id));
   if (!todo.length) return;
   upgrading = true;
-  let done = 0;
+  let roads = 0; let maps = 0;
   try {
     for (const r of todo) {
       upgradeTried.add(r.id);
       if (!navigator.onLine) break;
-      try { await saveRegionRoads(r); done++; } catch { /* try again next time the app starts */ }
+      if (oldRoads(r)) { try { await saveRegionRoads(r); roads++; } catch { /* try again next start */ } }
+      if (!r.mapSaved) { try { await saveRegionMap(r); maps++; } catch { /* try again next start */ } }
     }
   } finally {
     upgrading = false;
   }
-  if (done) {
+  if (roads || maps) {
     await loadData();
-    toast(`Roads saved for ${done} area${done > 1 ? 's' : ''}: routes now work offline`);
+    const what = [roads && 'roads', maps && 'map'].filter(Boolean).join(' and ');
+    toast(`Saved ${what} for your areas: routes and zooming now work offline`);
     if (state.route) updateRoute(false);
   }
 }
@@ -496,7 +514,7 @@ async function updateRoute(fit) {
   }
   if (g) {
     const sp = shortestPath(g, from, to, r.mode);
-    if (sp) { result = { ...sp, duration: sp.distance / SPEED[r.mode], straight: false }; source = 'offline'; }
+    if (sp) { result = { ...sp, straight: false }; source = 'offline'; }
   }
   if (!result && navigator.onLine) {
     try { result = await fetchRoute(from, to, r.mode); source = 'online'; } catch { /* fall back below */ }
@@ -516,7 +534,7 @@ function renderRoutePanel(message) {
   const cat = CATEGORY_BY_ID[r.place.cat];
   const res = r.result;
   const notes = {
-    offline: 'Shortest route on saved roads · works offline',
+    offline: r.mode === 'drive' ? 'Fastest route on saved roads (prefers main roads) · works offline' : 'Shortest route on saved roads · works offline',
     online: 'Route from the online routing service',
     straight: r.hadRoads
       ? 'No road connection found, so this is a straight line.'
@@ -615,14 +633,23 @@ async function downloadArea(lat, lon, label) {
     let roadsNote = '';
     try {
       await saveRegionRoads(region, ctrl.signal);
-      await loadData();
     } catch (err) {
       if (ctrl.signal.aborted) throw err;
       roadsNote = ' Roads could not be saved, so routes will need internet. Try ↻ later.';
     }
+    // The street map for the whole area, every zoom level.
+    status.textContent = 'Saving the map for offline use… 0%';
+    let mapNote = '';
+    try {
+      await saveRegionMap(region, ctrl.signal, (f) => { status.textContent = `Saving the map for offline use… ${Math.round(f * 100)}%`; });
+    } catch (err) {
+      if (ctrl.signal.aborted) throw err;
+      mapNote = ' The map could not be saved fully; it will be retried when you are online.';
+    }
+    await loadData();
     status.textContent = (places.length
-      ? `Saved ${places.length} places${roadsNote ? '' : ' and roads'} for offline use. ✅`
-      : 'Saved, but no places were found here. Try a bigger radius, or add places yourself with ＋.') + roadsNote;
+      ? `Saved ${places.length} places${roadsNote ? '' : ', roads'}${mapNote ? '' : ' and the map'} for offline use. ✅`
+      : 'Saved, but no places were found here. Try a bigger radius, or add places yourself with ＋.') + roadsNote + mapNote;
     toast(places.length ? `Saved ${places.length} places — works offline now` : 'No places found in this area');
     return true;
   } catch (err) {
@@ -762,7 +789,7 @@ async function renderRegions() {
   ul.innerHTML = state.regions.length
     ? [...state.regions].sort((a, b) => b.savedAt - a.savedAt).map((r) => `<li data-id="${esc(r.id)}">
         <div><div class="r-name">${esc(r.name)}</div>
-        <div class="muted small">${r.count} places · ${r.radius / 1000} km · ${r.roads ? 'offline routes ✓' : 'no offline routes (tap ↻)'} · saved ${timeAgo(r.savedAt)}${Date.now() - r.savedAt > staleMs ? ' · <b>refresh recommended</b>' : ''}</div></div>
+        <div class="muted small">${r.count} places · ${r.radius / 1000} km · ${r.roads ? 'routes ✓' : 'no routes yet'} · ${r.mapSaved ? 'map ✓' : 'map not saved yet'} · saved ${timeAgo(r.savedAt)}${Date.now() - r.savedAt > staleMs ? ' · <b>refresh recommended</b>' : ''}</div></div>
         <div class="btn-row nowrap">
           <button class="btn small ghost" data-act="refresh" aria-label="Download ${esc(r.name)} again">↻</button>
           <button class="btn small danger" data-act="del">Delete</button>
@@ -1022,6 +1049,9 @@ function bindEvents() {
     if (btn.dataset.act === 'del') {
       if (!window.confirm(`Delete “${r.name}” and its ${r.count} places?`)) return;
       await db.deleteRegion(r.id);
+      // Remove its map files, keeping any another saved area also uses.
+      const keep = new Set(state.regions.filter((x) => x.id !== r.id).flatMap((x) => x.mapKeys || []));
+      await removeAreaMap(r.mapKeys || [], keep);
       await loadData();
     } else {
       $('#radius').value = String(r.radius);
@@ -1029,7 +1059,7 @@ function bindEvents() {
     }
   });
   $('#clearTilesBtn').addEventListener('click', async () => {
-    if (!window.confirm('Remove saved map pictures? Your places are kept.')) return;
+    if (!window.confirm('Remove map data you only browsed? Maps of your saved areas and your places are kept.')) return;
     await clearMapCache();
     renderRegions();
   });

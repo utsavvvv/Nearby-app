@@ -101,3 +101,40 @@ test('handles a city-sized graph quickly', () => {
   assert.ok(t1 - t0 < 3000, `build ${t1 - t0} ms`);
   assert.ok(t2 - t1 < 1500, `route ${t2 - t1} ms`);
 });
+
+test('driving prefers main roads, walking takes the shortest way', () => {
+  // From A to B: a direct residential lane (1 km) or a primary road detour (1.4 km).
+  const els = [
+    { type: 'node', id: 1, lat: 25, lon: 82 }, // A
+    { type: 'node', id: 2, lat: 25.009, lon: 82 }, // B (~1 km north)
+    { type: 'node', id: 3, lat: 25.0045, lon: 82.0042 }, // detour corner
+  ];
+  els.push({ type: 'way', id: 10, nodes: [1, 2], tags: { highway: 'residential' } });
+  els.push({ type: 'way', id: 11, nodes: [1, 3, 2], tags: { highway: 'primary' } });
+  const g = buildGraph(els);
+  const walk = shortestPath(g, { lat: 25, lon: 82 }, { lat: 25.009, lon: 82 }, 'walk');
+  const drive = shortestPath(g, { lat: 25, lon: 82 }, { lat: 25.009, lon: 82 }, 'drive');
+  assert.ok(walk.distance < 1100, `walk ${walk.distance}`); // straight lane
+  assert.ok(drive.distance > 1300, `drive ${drive.distance}`); // longer but faster main road
+  // ~1.4 km at 40 km/h ≈ 2 min, much less than the lane at 16 km/h (~3.8 min).
+  assert.ok(drive.duration < 160, `drive ${drive.duration}s`);
+  assert.ok(Math.abs(walk.duration - walk.distance / (4.8 / 3.6)) < 1);
+});
+
+test('speed limits lower the road speed', () => {
+  const els = [
+    { type: 'node', id: 1, lat: 25, lon: 82 }, { type: 'node', id: 2, lat: 25.009, lon: 82 },
+  ];
+  els.push({ type: 'way', id: 1, nodes: [1, 2], tags: { highway: 'primary', maxspeed: '20' } });
+  const g = buildGraph(els);
+  assert.equal(g.speeds[0], 20);
+  const r = shortestPath(g, { lat: 25, lon: 82 }, { lat: 25.009, lon: 82 }, 'drive');
+  assert.ok(Math.abs(r.duration - r.distance / (20 / 3.6)) < 2);
+});
+
+test('older graphs without speeds still route', () => {
+  const g = buildGraph(grid());
+  delete g.speeds;
+  g.version = 1;
+  assert.ok(shortestPath(g, pt(0, 0), pt(3, 3), 'drive'));
+});
