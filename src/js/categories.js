@@ -57,6 +57,10 @@ export const CATEGORIES = [
     match: { amenity: ['police'] },
   },
   {
+    id: 'education', label: 'Schools & Colleges', icon: '🏫', color: '#3949ab',
+    match: { amenity: ['school', 'college', 'university', 'kindergarten'] },
+  },
+  {
     id: 'other', label: 'Other', icon: '📍', color: '#757575',
     match: {},
   },
@@ -89,4 +93,34 @@ export function buildOverpassQuery(lat, lon, radiusMeters) {
     ([key, values]) => `  nwr["${key}"~"^(${[...values].join('|')})$"]${around};`,
   );
   return `[out:json][timeout:90];\n(\n${parts.join('\n')}\n);\nout center tags;`;
+}
+
+// Everyday words people type, so "school" or "chemist" can be recognised as a category
+// rather than the name of a town.
+const KEYWORDS = {
+  pan: ['pan', 'paan', 'tobacco', 'cigarette', 'bidi', 'kiosk', 'pan shop', 'paan shop'],
+  grocery: ['store', 'shop', 'grocery', 'kirana', 'supermarket', 'general store', 'bakery', 'dairy', 'mall'],
+  tea: ['tea', 'chai', 'cafe', 'coffee', 'tea stall'],
+  food: ['food', 'restaurant', 'dhaba', 'eat', 'eatery', 'fast food', 'canteen'],
+  pharmacy: ['pharmacy', 'chemist', 'medical store', 'medical shop', 'medicine', 'drug store'],
+  atm: ['atm', 'bank', 'cash', 'money exchange'],
+  medical: ['hospital', 'clinic', 'doctor', 'emergency'],
+  toilets: ['toilet', 'washroom', 'restroom', 'bathroom', 'loo'],
+  water: ['water', 'drinking water'],
+  stay: ['hotel', 'lodge', 'guest house', 'guesthouse', 'hostel', 'stay', 'room', 'dharamshala'],
+  transport: ['bus', 'bus stand', 'train', 'railway', 'station', 'taxi', 'metro'],
+  fuel: ['petrol', 'diesel', 'fuel', 'petrol pump', 'cng', 'gas station'],
+  police: ['police', 'police station', 'thana'],
+  education: ['school', 'college', 'university', 'kindergarten', 'coaching'],
+};
+
+/** If the text is a kind of place ("schools", "Chemist") rather than a name, return its category id. */
+export function categoryForQuery(text) {
+  const q = String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!q) return null;
+  const forms = new Set([q, q.replace(/es$/, ''), q.replace(/s$/, '')]);
+  for (const [id, words] of Object.entries(KEYWORDS)) {
+    if (words.some((w) => forms.has(w))) return id;
+  }
+  return null;
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+- New category: 🏫 Schools & Colleges.
+- Town search shows up to 5 matches, nearest to you first, with the distance, so a
+  same-named place abroad (e.g. "School", Busan) can't be picked by mistake.
+- Typing a kind of place ("school", "chemist", "ATM") in town search explains how to find
+  those and jumps to the right category.
+
 ## 1.2.0
 
 - Hotels: "Check prices & book" on each hotel and "Compare hotels" for your area (Booking.com

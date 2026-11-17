@@ -1,4 +1,4 @@
-import { CATEGORIES, CATEGORY_BY_ID } from './categories.js';
+import { CATEGORIES, CATEGORY_BY_ID, categoryForQuery } from './categories.js';
 import { distance, bearing, compassPoint, formatDistance, walkTime } from './geo.js';
 import * as db from './db.js';
 import { fetchPlaces } from './overpass.js';
@@ -457,17 +457,67 @@ async function searchTown(e) {
   e.preventDefault();
   const q = $('#placeQuery').value.trim();
   if (!q) return;
-  if (!navigator.onLine) { toast('Town search needs internet'); return; }
+  const box = $('#townResult');
+  // "school", "atm", "chemist"... is a kind of place, not a town: say how to find those.
+  const cat = categoryForQuery(q);
+  const hint = cat
+    ? `<div class="town-hint">Looking for ${esc(CATEGORY_BY_ID[cat].label.toLowerCase())}? Save your area (⬇ Around me), then tap
+        <button class="btn small ghost" data-town-cat="${cat}">${CATEGORY_BY_ID[cat].icon} ${esc(CATEGORY_BY_ID[cat].label)}</button> on the Nearby tab.
+        This box is for town and city names.</div>`
+    : '';
+  if (!navigator.onLine) {
+    box.hidden = false;
+    box.innerHTML = hint || '<div class="town-hint">Town search needs internet.</div>';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `${hint}<p class="muted small">Searching…</p>`;
   try {
-    const [hit] = await fetchJson(`${NOMINATIM_URL}/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`);
-    if (!hit) { toast(`Couldn't find “${q}”`); return; }
-    const label = hit.name || q;
-    $('#townResult').hidden = false;
-    $('#townResult').innerHTML = `<span>📍 <b>${esc(label)}</b> <span class="muted small">${esc(hit.display_name || '')}</span></span>
-      <button class="btn small" id="townDl">⬇ Save this town</button>`;
-    $('#townDl').onclick = () => downloadArea(Number(hit.lat), Number(hit.lon), label);
-    if (map) map.setView([Number(hit.lat), Number(hit.lon)], 14);
-  } catch { toast('Search failed — check your connection'); }
+    const hits = await findTowns(q);
+    const rows = hits.map((h, i) => {
+      const away = state.pos ? ` · ${formatDistance(distance(state.pos.lat, state.pos.lon, h.lat, h.lon))} away` : '';
+      return `<li><span><b>${esc(h.name)}</b><span class="muted small"> ${esc(h.where)}${away}</span></span>
+        <button class="btn small" data-town="${i}">⬇ Save</button></li>`;
+    }).join('');
+    box.innerHTML = `${hint}${rows ? `<ul class="town-list">${rows}</ul>` : `<p class="muted small">No town called “${esc(q)}” found.</p>`}`;
+    box.onclick = (ev) => {
+      const t = ev.target.closest('[data-town]');
+      if (t) {
+        const h = hits[Number(t.dataset.town)];
+        if (map) map.setView([h.lat, h.lon], 14);
+        downloadArea(h.lat, h.lon, h.name);
+      }
+      const c = ev.target.closest('[data-town-cat]');
+      if (c) { state.cat = c.dataset.townCat; showView('list'); render(); }
+    };
+  } catch {
+    box.innerHTML = `${hint}<p class="muted small">Search failed. Check your connection.</p>`;
+  }
+}
+
+/** Towns and cities matching a name, nearest to the user first. */
+async function findTowns(q) {
+  const params = new URLSearchParams({ format: 'jsonv2', limit: '8', q, featureType: 'settlement' });
+  if (state.pos) {
+    // Prefer results around the user (not a hard limit, so far-away towns still work).
+    const { lat, lon } = state.pos;
+    params.set('viewbox', [lon - 5, lat + 5, lon + 5, lat - 5].map((n) => n.toFixed(4)).join(','));
+  }
+  let hits = await fetchJson(`${NOMINATIM_URL}/search?${params}`);
+  if (!hits.length) {
+    // Not a town: try landmarks too (e.g. "Kedarnath Temple").
+    params.delete('featureType');
+    hits = await fetchJson(`${NOMINATIM_URL}/search?${params}`);
+  }
+  const out = hits
+    .map((h) => {
+      const name = h.name || String(h.display_name || q).split(',')[0];
+      const where = String(h.display_name || '').split(',').slice(1).map((x) => x.trim()).filter(Boolean).slice(-3).join(', ');
+      return { name, where, lat: Number(h.lat), lon: Number(h.lon) };
+    })
+    .filter((h) => Number.isFinite(h.lat) && Number.isFinite(h.lon));
+  if (state.pos) out.sort((a, b) => distance(state.pos.lat, state.pos.lon, a.lat, a.lon) - distance(state.pos.lat, state.pos.lon, b.lat, b.lon));
+  return out.slice(0, 5);
 }
 
 async function renderRegions() {

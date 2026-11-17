@@ -35,3 +35,20 @@ test('overpass query covers all categories', () => {
   assert.match(q, /nwr\["railway"~/);
   assert.match(q, /out center tags;$/);
 });
+
+test('schools and colleges are a category', () => {
+  assert.equal(classify({ amenity: 'school' }), 'education');
+  assert.equal(classify({ amenity: 'university' }), 'education');
+});
+
+test('recognises kinds of places typed as search text', async () => {
+  const { categoryForQuery } = await import('../../src/js/categories.js');
+  assert.equal(categoryForQuery('School'), 'education');
+  assert.equal(categoryForQuery('schools'), 'education');
+  assert.equal(categoryForQuery(' Chemist '), 'pharmacy');
+  assert.equal(categoryForQuery('paan shop'), 'pan');
+  assert.equal(categoryForQuery('ATM'), 'atm');
+  assert.equal(categoryForQuery('petrol pump'), 'fuel');
+  assert.equal(categoryForQuery('Varanasi'), null);
+  assert.equal(categoryForQuery(''), null);
+});

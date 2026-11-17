@@ -43,7 +43,17 @@ test.beforeEach(async ({ context }) => {
   // Never hit real servers in tests.
   await context.route(/\/api\/interpreter$/, (r) => r.fulfill({ json: { elements: ELEMENTS } }));
   await context.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: { address: { suburb: 'Godowlia' } } }));
-  await context.route(/nominatim\.openstreetmap\.org\/search/, (r) => r.fulfill({ json: [{ lat: '25.3176', lon: '82.9739', name: 'Varanasi', display_name: 'Varanasi, Uttar Pradesh, India' }] }));
+  await context.route(/nominatim\.openstreetmap\.org\/search/, (r) => {
+    const q = new URL(r.request().url()).searchParams.get('q').toLowerCase();
+    if (q === 'school') {
+      // Like the real service: a far-away place literally named "School", and one nearby.
+      return r.fulfill({ json: [
+        { lat: '35.1796', lon: '129.0756', name: 'School', display_name: 'School, Soemi-ro, Busan, 47856, South Korea' },
+        { lat: '25.6000', lon: '83.1000', name: 'School', display_name: 'School, Ghazipur, Uttar Pradesh, India' },
+      ] });
+    }
+    return r.fulfill({ json: [{ lat: '25.3176', lon: '82.9739', name: 'Varanasi', display_name: 'Varanasi, Uttar Pradesh, India' }] });
+  });
   await mockMap(context);
   await context.route(/^https:\/\/(www\.booking\.com|play\.google\.com)\//, (r) => r.fulfill({ contentType: 'text/html', body: '<h1>partner</h1>' }));
 });
@@ -152,7 +162,8 @@ test('town search offers to save that town', async ({ page }) => {
   await page.getByRole('button', { name: 'Offline areas' }).click();
   await page.locator('#placeQuery').fill('Varanasi');
   await page.getByRole('button', { name: 'Find' }).click();
-  await page.getByRole('button', { name: /Save this town/ }).click();
+  await expect(page.locator('#townResult')).not.toContainText('Looking for');
+  await page.locator('.town-list').getByRole('button', { name: /Save/ }).first().click();
   await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
   await expect(page.locator('#regions')).toContainText('Varanasi');
 });
@@ -303,4 +314,29 @@ test('Android app without a Play product explains instead of erroring', async ({
   await expect(page.locator('#toast')).toContainText('installed from Google Play');
   await expect(page.locator('#toast')).not.toContainText('No product found');
   expect(await page.evaluate(() => window.__bought)).toBeUndefined();
+});
+
+test('typing "school" explains categories and lists nearest towns first', async ({ page }) => {
+  const requests = [];
+  page.on('request', (r) => { if (r.url().includes('nominatim.openstreetmap.org/search')) requests.push(new URL(r.url())); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.locator('#placeQuery').fill('School');
+  await page.getByRole('button', { name: 'Find' }).click();
+
+  const hint = page.locator('.town-hint');
+  await expect(hint).toContainText('Looking for schools & colleges?');
+  await expect(page.locator('.town-list li')).toHaveCount(2);
+  await expect(page.locator('.town-list li').first()).toContainText('Ghazipur'); // nearest first
+  await expect(page.locator('.town-list li').last()).toContainText('South Korea');
+  await expect(page.locator('.town-list li').last()).toContainText('km away');
+
+  // Search asks for towns, biased to where the user is.
+  expect(requests[0].searchParams.get('featureType')).toBe('settlement');
+  expect(requests[0].searchParams.get('viewbox')).toBeTruthy();
+
+  // The hint button jumps to the category on the Nearby tab.
+  await hint.getByRole('button', { name: /Schools & Colleges/ }).click();
+  await expect(page.locator('#view-list')).toBeVisible();
+  await expect(page.locator('.chip[data-cat=education]')).toHaveAttribute('aria-pressed', 'true');
 });
