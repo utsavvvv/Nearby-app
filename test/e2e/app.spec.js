@@ -486,9 +486,8 @@ test('route to a place: shortest path on saved roads, offline', async ({ page, c
   await expect.poll(() => routeBluePixels(page)).toBeLessThan(50);
 });
 
-test('route falls back to the online service, then a straight line', async ({ page, context }) => {
-  await page.goto('/');
-  // An area saved before offline routes existed: places only, no roads.
+/** Put an area saved by an older version (places, no roads) into storage. */
+async function addOldArea(page) {
   await page.evaluate(async () => {
     const db = await new Promise((res) => { const q = indexedDB.open('nearby-app', 2); q.onsuccess = () => res(q.result); });
     const tx = db.transaction(['regions', 'places'], 'readwrite');
@@ -496,6 +495,41 @@ test('route falls back to the online service, then a straight line', async ({ pa
     tx.objectStore('places').put({ id: 'osm:node/1', source: 'osm', regionId: 'old', lat: 25.33, lon: 82.99, cat: 'pan', name: 'Far Pan Shop' });
     await new Promise((res) => { tx.oncomplete = res; });
   });
+}
+
+test('areas saved before roads existed get roads automatically', async ({ page }) => {
+  await page.goto('/');
+  await addOldArea(page);
+  await page.reload();
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await expect(page.locator('#regions')).toContainText('offline routes ✓', { timeout: 15000 });
+  await expect(page.locator('#toast')).toContainText('routes now work offline');
+});
+
+test('route saves the roads it needs when online, then works offline', async ({ page, context }) => {
+  await page.goto('/');
+  await addOldArea(page);
+  await page.reload();
+  await page.locator('.place-main').first().click();
+  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await expect(page.locator('#routePanel')).toContainText('Shortest route on saved roads · works offline');
+  await expect(page.locator('#routePanel .route-sum')).toContainText('3.0 km');
+
+  // Same route with no internet: still follows the roads.
+  await page.getByRole('button', { name: 'Close route' }).click();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Nearby' }).click();
+  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await expect(page.locator('#routePanel')).toContainText('works offline');
+  await expect.poll(() => routeBluePixels(page), { timeout: 10000 }).toBeGreaterThan(500);
+});
+
+test('if roads cannot be downloaded: online routing service, then a straight line', async ({ page, context }) => {
+  // The road server fails (e.g. busy), places still load.
+  await context.route(/\/api\/interpreter$/, (r) => (decodeURIComponent(r.request().postData() || '').includes('"highway"')
+    ? r.fulfill({ status: 504, body: 'busy' }) : r.fulfill({ json: { elements: ELEMENTS } })));
+  await page.goto('/');
+  await addOldArea(page);
   await page.reload();
   await page.locator('.place-main').first().click();
   await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
@@ -505,7 +539,7 @@ test('route falls back to the online service, then a straight line', async ({ pa
   await page.getByRole('button', { name: 'Nearby' }).click();
   await context.setOffline(true);
   await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
-  await expect(page.locator('#routePanel')).toContainText('Save this area again (↻) while online');
+  await expect(page.locator('#routePanel')).toContainText('Open this route once while online');
 });
 
 test('route button in a map marker popup', async ({ page }) => {
@@ -515,4 +549,20 @@ test('route button in a map marker popup', async ({ page }) => {
   await page.locator('.maplibregl-popup').getByRole('button', { name: /Route/ }).click();
   await expect(page.locator('#routePanel')).toContainText('Raju Pan Bhandar');
   await expect(page.locator('#routePanel')).toContainText('works offline');
+});
+
+test('a too-big road download is retried with a smaller area', async ({ page, context }) => {
+  const radii = [];
+  await context.route(/\/api\/interpreter$/, (r) => {
+    const q = decodeURIComponent(r.request().postData() || '');
+    if (!q.includes('"highway"')) return r.fulfill({ json: { elements: ELEMENTS } });
+    radii.push(Number(q.match(/around:(\d+)/)[1]));
+    // The server gives up on the full 5 km area (like a busy server on a dense city).
+    return radii.length <= 3 ? r.fulfill({ json: { elements: [], remark: 'runtime error: Query timed out' } }) : r.fulfill({ json: { elements: ROADS } });
+  });
+  await saveArea(page);
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await expect(page.locator('#regions')).toContainText('offline routes ✓');
+  // 3 failed tries at 5 km (one per server), then 2.5 km works.
+  expect(radii).toEqual([5000, 5000, 5000, 2500]);
 });

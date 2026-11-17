@@ -33,7 +33,7 @@ export async function fetchPlaces(lat, lon, radiusMeters, regionId, { signal, en
 export async function fetchRoads(lat, lon, radiusMeters, { signal, endpoints = OVERPASS_ENDPOINTS, timeoutMs = OVERPASS_TIMEOUT_MS } = {}) {
   const around = `(around:${Math.round(radiusMeters)},${lat.toFixed(6)},${lon.toFixed(6)})`;
   const query = `[out:json][timeout:120];
-way["highway"~"^(${ROAD_TYPES.join('|')})$"]${around}->.w;
+way["highway"~"^(${ROAD_TYPES.join('|')})$"]["service"!~"^(parking_aisle|driveway|drive-through)$"]["area"!="yes"]${around}->.w;
 .w out body qt;
 node(w.w);
 out skel qt;`;

@@ -89,6 +89,7 @@ function updateNet() {
   renderBanner();
 }
 window.addEventListener('online', updateNet);
+window.addEventListener('online', () => setTimeout(() => upgradeRoads(), 3000));
 window.addEventListener('offline', updateNet);
 
 // ---------- location ----------
@@ -386,14 +387,78 @@ let graphCache = null; // { id, g }
 /** The saved road graph that covers both points, if any (loaded from storage once). */
 async function graphFor(a, b) {
   const inside = (r, p) => distance(r.lat, r.lon, p.lat, p.lon) <= (r.roadRadius || 0);
-  const region = state.regions
-    .filter((r) => r.roads && inside(r, a) && inside(r, b))
+  const region = [...state.regions.filter((r) => r.roads), ...loadPref('roadPatches', [])]
+    .filter((r) => inside(r, a) && inside(r, b))
     .sort((x, y) => x.roadRadius - y.roadRadius)[0];
   if (!region) return null;
   if (graphCache?.id === region.id) return graphCache.g;
   const g = await db.getOne('graphs', region.id).catch(() => null);
   if (g) graphCache = { id: region.id, g };
   return g;
+}
+
+/**
+ * Download roads around a point and store them as a graph under `id`.
+ * Busy servers often fail on big, dense areas, so retry with a smaller circle.
+ * @returns the radius actually saved (metres)
+ */
+async function saveRoads(id, lat, lon, radius, signal, minRadius = 1500) {
+  let r = Math.min(radius, MAX_ROAD_RADIUS);
+  for (;;) {
+    try {
+      const graph = buildGraph(await fetchRoads(lat, lon, r, { signal }));
+      if (!graph.count) throw new Error('no roads found');
+      await db.put('graphs', { regionId: id, ...graph });
+      if (graphCache?.id === id) graphCache = null;
+      return r;
+    } catch (err) {
+      if (signal?.aborted || r / 2 < minRadius) throw err;
+      r = Math.round(r / 2);
+    }
+  }
+}
+
+async function saveRegionRoads(region, signal) {
+  const roadRadius = await saveRoads(region.id, region.lat, region.lon, region.radius, signal);
+  await db.put('regions', { ...region, roads: true, roadRadius });
+}
+
+/** Areas saved before offline routes existed get their roads in the background when online. */
+let upgrading = false;
+const upgradeTried = new Set();
+async function upgradeRoads() {
+  if (upgrading || !navigator.onLine) return;
+  const todo = state.regions.filter((r) => !r.roads && !upgradeTried.has(r.id));
+  if (!todo.length) return;
+  upgrading = true;
+  let done = 0;
+  try {
+    for (const r of todo) {
+      upgradeTried.add(r.id);
+      if (!navigator.onLine) break;
+      try { await saveRegionRoads(r); done++; } catch { /* try again next time the app starts */ }
+    }
+  } finally {
+    upgrading = false;
+  }
+  if (done) {
+    await loadData();
+    toast(`Roads saved for ${done} area${done > 1 ? 's' : ''}: routes now work offline`);
+    if (state.route) updateRoute(false);
+  }
+}
+
+/** Roads covering one trip (start + destination + margin), saved for offline use. */
+async function saveTripRoads(from, to) {
+  const lat = (from.lat + to.lat) / 2; const lon = (from.lon + to.lon) / 2;
+  const radius = distance(from.lat, from.lon, to.lat, to.lon) / 2 + 1000;
+  if (radius > 8000) throw new Error('trip too long');
+  const id = `patch:${lat.toFixed(4)},${lon.toFixed(4)},${Math.round(radius)}`;
+  const saved = await saveRoads(id, lat, lon, radius, undefined, radius);
+  const patches = [{ id, lat, lon, roadRadius: saved, savedAt: Date.now() }, ...loadPref('roadPatches', []).filter((p) => p.id !== id)];
+  // Keep the 15 most recent trips.
+  for (const old of patches.splice(15)) db.remove('graphs', old.id).catch(() => {});
+  savePref('roadPatches', patches);
 }
 
 function routePanelSpace() {
@@ -422,7 +487,13 @@ async function updateRoute(fit) {
   const to = { lat: r.place.lat, lon: r.place.lon };
   if (!r.result) renderRoutePanel('Finding the shortest route…');
   let result = null; let source = 'straight';
-  const g = await graphFor(from, to);
+  let g = await graphFor(from, to);
+  if (!g && navigator.onLine) {
+    // No saved roads here yet: fetch them now (once) so this route also works offline later.
+    renderRoutePanel('Saving the roads for this route so it works offline…');
+    try { await saveTripRoads(from, to); g = await graphFor(from, to); } catch { /* use the online service below */ }
+    if (state.route !== r) return;
+  }
   if (g) {
     const sp = shortestPath(g, from, to, r.mode);
     if (sp) { result = { ...sp, duration: sp.distance / SPEED[r.mode], straight: false }; source = 'offline'; }
@@ -451,7 +522,7 @@ function renderRoutePanel(message) {
       ? 'No road connection found, so this is a straight line.'
       : navigator.onLine
         ? 'Couldn\'t get a road route, so this is a straight line.'
-        : 'Straight line: roads for this spot aren\'t saved. Save this area again (↻) while online for offline routes.',
+        : 'Straight line: the roads here aren\'t saved yet. Open this route once while online and they will be saved for offline use.',
   };
   const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${r.place.lat},${r.place.lon}&travelmode=${r.mode === 'drive' ? 'driving' : 'walking'}`;
   panel.hidden = false;
@@ -541,13 +612,9 @@ async function downloadArea(lat, lon, label) {
     requestPersistentStorage();
     // Roads for offline routes. If this part fails the places are still saved.
     status.textContent = `Saved ${places.length} places. Now saving roads for offline routes…`;
-    const roadRadius = Math.min(radius, MAX_ROAD_RADIUS);
     let roadsNote = '';
     try {
-      const graph = buildGraph(await fetchRoads(lat, lon, roadRadius, { signal: ctrl.signal }));
-      await db.put('graphs', { regionId: id, ...graph });
-      await db.put('regions', { ...region, roads: true, roadRadius });
-      if (graphCache?.id === id) graphCache = null;
+      await saveRegionRoads(region, ctrl.signal);
       await loadData();
     } catch (err) {
       if (ctrl.signal.aborted) throw err;
@@ -1045,6 +1112,7 @@ async function main() {
   }
   startGps();
   if (loadPref('compass', false) && typeof DeviceOrientationEvent?.requestPermission !== 'function') toggleCompass();
+  setTimeout(() => upgradeRoads(), 4000);
   registerServiceWorker();
   pro.onChange(renderPro);
   renderPro();

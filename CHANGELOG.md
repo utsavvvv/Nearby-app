@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.1
+
+- Routes follow the roads offline in more cases:
+  - Areas saved before 1.4.0 get their roads automatically in the background when online.
+  - Tapping Route where no roads are saved (while online) downloads the roads for that trip
+    first and keeps them, so the same route works offline later.
+  - Road downloads skip parking aisles and driveways, and retry with a smaller area if the
+    server can't handle a big, dense one.
+
 ## 1.4.0
 
 - 🧭 Route: tap Route on any place (list or map marker) to see a blue route line from your
