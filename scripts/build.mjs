@@ -20,6 +20,18 @@ await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 await cp(src, out, { recursive: true, filter: (p) => !p.endsWith(`${sep}sw.js`) });
 
+// Fonts (Space Grotesk + Plus Jakarta Sans, SIL Open Font License), bundled so they work offline.
+const FONTS = {
+  'space-grotesk': ['500', '600', '700'],
+  'plus-jakarta-sans': ['500', '600', '700', '800'],
+};
+await mkdir(join(out, 'fonts'), { recursive: true });
+for (const [family, weights] of Object.entries(FONTS)) {
+  const dir = join(root, 'node_modules', '@fontsource', family);
+  for (const w of weights) await cp(join(dir, 'files', `${family}-latin-${w}-normal.woff2`), join(out, 'fonts', `${family}-${w}.woff2`));
+  await cp(join(dir, 'LICENSE'), join(out, 'fonts', `${family}-LICENSE.txt`));
+}
+
 // MapLibre GL (map renderer). The main module loads its worker from the same folder.
 const maplibre = join(root, 'node_modules', 'maplibre-gl', 'dist');
 await mkdir(join(out, 'vendor', 'maplibre'), { recursive: true });

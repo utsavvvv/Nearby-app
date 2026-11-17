@@ -4,129 +4,154 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <!--CSP-->
-  <meta name="theme-color" content="#0f766e">
+  <meta name="theme-color" content="#fff8ec">
   <script src="js/theme-init.js"></script>
-  <meta name="description" content="Find nearby stores, pan shops, ATMs, pharmacies, tea stalls and more — even without internet.">
+  <meta name="description" content="Find nearby pan & chai stalls, stores, ATMs, chemists and more, with routes — even without internet.">
   <title>Nearby Offline</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preload" href="fonts/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo" aria-hidden="true">📍</span>
-      <div>
-        <h1>Nearby Offline <span id="proBadge" class="pro-badge" hidden>PRO</span></h1>
-        <p id="locStatus" class="sub" aria-live="polite">Finding your location…</p>
-      </div>
+      <h1>nearby<br>offline</h1>
+      <span class="sticker orange flat tilt-r pin-tag" id="proBadge" hidden>pro</span>
+      <p id="locStatus" class="sub" aria-live="polite">📍 finding you…</p>
     </div>
     <div class="top-actions">
-      <span id="netStatus" class="pill" aria-live="polite">Online</span>
+      <span id="netStatus" class="net-pill" aria-live="polite">online</span>
       <button id="themeBtn" class="icon-btn" aria-label="Appearance" title="Appearance">🌓</button>
       <button id="compassBtn" class="icon-btn" aria-pressed="false" aria-label="Compass" title="Compass">🧭</button>
     </div>
   </header>
 
   <div id="updateBar" class="update-bar" role="status" hidden>
-    <span>A new version is ready.</span>
+    <span>✨ new version ready</span>
     <button id="updateBtn" class="btn small">Update</button>
   </div>
 
   <nav class="chips" id="chips" aria-label="Categories"></nav>
 
   <main>
-    <!-- LIST VIEW -->
+    <!-- NEARBY -->
     <section id="view-list" class="view active" aria-label="Nearby places">
+      <div id="hero" class="hero"><b>no signal? no stress ⚡</b><span id="heroTag" class="sticker lime tilt-l" hidden>100% cached</span></div>
+      <p id="foundLine" class="found-line" hidden></p>
       <div class="search-row">
-        <input id="search" type="search" placeholder="Search: pan, chemist, tea, ATM…" autocomplete="off" aria-label="Search places">
-        <label class="toggle"><input id="hideClosed" type="checkbox"> Hide closed</label>
+        <div class="search-box">
+          <input id="search" type="search" placeholder="search: pan, chai, ATM, medical…" autocomplete="off" aria-label="Search places">
+        </div>
       </div>
+      <div class="toggles">
+        <label class="check-sticker"><input id="hideClosed" type="checkbox"> hide closed 🚫</label>
+        <span class="sticker blue-soft flat">↗ nearest first</span>
+      </div>
+      <div id="compassCard" class="compass-card" hidden></div>
       <div id="banner" class="banner" hidden></div>
-      <div id="hotelCard" class="banner partner-card" hidden></div>
+      <div id="hotelCard" class="partner-card" hidden></div>
       <ul id="list" class="list"></ul>
-      <p id="listMore" class="muted center" hidden></p>
+      <p id="listMore" class="muted center list-more" hidden></p>
+      <div id="packCard" class="pack-card" hidden></div>
     </section>
 
-    <!-- MAP VIEW -->
+    <!-- MAP -->
     <section id="view-map" class="view" aria-label="Map">
       <div id="map"></div>
-      <div class="map-actions">
-        <button id="recenterBtn" class="btn small">◎ Me</button>
-        <button id="setHereBtn" class="btn small ghost" title="Use the map centre as your location when GPS is unavailable">Set my location here</button>
+      <div class="map-top">
+        <span id="mapPack" class="sticker card-pill" hidden></span>
+        <span id="mapHeading" class="sticker lime" hidden></span>
+      </div>
+      <div class="map-side">
+        <button id="recenterBtn" class="icon-btn me-btn" aria-label="Me"><span>◎</span>ME</button>
+        <button id="setHereBtn" class="btn small soft" title="Use the map centre as your location when GPS is unavailable">Set my location here</button>
       </div>
       <div class="crosshair" aria-hidden="true">+</div>
       <div id="routePanel" class="route-panel" role="region" aria-label="Route" hidden></div>
     </section>
 
-    <!-- AREAS VIEW -->
+    <!-- SAVED (offline areas) -->
     <section id="view-areas" class="view" aria-label="Offline areas">
+      <div class="ticker-banner"><span>⚡ offline packs</span><span id="storageSticker" class="sticker flat"></span></div>
+
       <div class="card">
-        <h2>Save an area for offline use</h2>
-        <p class="muted">Do this while you have internet (hotel Wi‑Fi, before your trip). Shops, pan stalls, ATMs, pharmacies and more are stored on your phone and work with no signal.</p>
-        <label class="field">Radius
-          <select id="radius">
-            <option value="2000">2 km</option>
-            <option value="5000" selected>5 km</option>
-            <option value="10000" data-pro>10 km</option>
-            <option value="20000" data-pro>20 km — large, slower</option>
-          </select>
-        </label>
-        <div class="btn-row">
-          <button id="dlHereBtn" class="btn">⬇ Around me</button>
-          <button id="dlMapBtn" class="btn ghost">⬇ Around map centre</button>
-          <button id="dlCancelBtn" class="btn danger" hidden>Cancel</button>
+        <div class="card-head">
+          <h2>Save an area 💾</h2>
+          <span id="gpsSticker" class="sticker lime tilt-r">GPS ready</span>
         </div>
-        <p class="small field-label">Search a town to save, or what you need near you</p>
+        <p class="muted">Download places, roads and the street map for zero-network zones. Do it on Wi‑Fi before you go.</p>
+
+        <p class="label field-label"><span>Target zone or landmark</span></p>
         <form id="placeSearch" class="search-row">
-          <input id="placeQuery" type="search" placeholder="Town, or what you need: e.g. Varanasi, school, ATM" autocomplete="off" aria-label="Search a town or city">
-          <button class="btn ghost" type="submit">Find</button>
+          <div class="search-box"><input id="placeQuery" type="search" placeholder="town, or what you need: Varanasi, school, ATM" autocomplete="off" aria-label="Search a town or city"></div>
+          <button class="btn soft" type="submit">Find</button>
         </form>
         <div id="townResult" class="town-result" hidden></div>
-        <p id="dlStatus" class="muted" role="status" aria-live="polite"></p>
+
+        <p class="label field-label"><span>Radius bounds</span></p>
+        <select id="radius" hidden aria-hidden="true" tabindex="-1">
+          <option value="2000">2 km</option>
+          <option value="5000" selected>5 km</option>
+          <option value="10000" data-pro>10 km</option>
+          <option value="20000" data-pro>20 km</option>
+        </select>
+        <div class="tiles" id="radiusTiles" role="radiogroup" aria-label="Radius">
+          <button class="tile" role="radio" data-radius="2000" aria-checked="false"><b>2 km</b><small>walkable</small></button>
+          <button class="tile" role="radio" data-radius="5000" aria-checked="true"><b>5 km</b><small>metro</small></button>
+          <button class="tile" role="radio" data-radius="10000" aria-checked="false"><b>10 km</b><small>sub-city</small><span class="sticker orange corner" data-pro-tag>pro</span></button>
+          <button class="tile" role="radio" data-radius="20000" aria-checked="false"><b>20 km</b><small>full hub</small><span class="sticker blue corner" data-pro-tag>pro</span></button>
+        </div>
+        <div class="dl-buttons">
+          <button id="dlHereBtn" class="btn lime">◎ Around me</button>
+          <button id="dlMapBtn" class="btn soft">⛶ Map centre</button>
+        </div>
+        <div id="dlProgress" class="progress-card" hidden>
+          <div class="top"><span class="dot"></span><b id="dlProgressLabel" class="grow">Saving…</b><button id="dlCancelBtn" class="icon-btn" aria-label="Cancel">✕</button></div>
+          <div class="bar"><i id="dlProgressBar"></i></div>
+        </div>
+        <p id="dlStatus" class="muted small" role="status" aria-live="polite"></p>
       </div>
 
-      <div class="card">
-        <h2>Saved areas</h2>
-        <ul id="regions" class="regions"></ul>
-        <p id="storage" class="muted small"></p>
-        <button id="clearTilesBtn" class="btn small ghost">Clear browsed map data</button>
-      </div>
+      <div class="section-title"><h2 id="regionsTitle">Saved areas 📦</h2><span id="placesSticker" class="sticker blue-soft flat"></span></div>
+      <ul id="regions" class="regions"></ul>
+      <p id="storage" class="muted small"></p>
+      <button id="clearTilesBtn" class="btn small soft">Clear browsed map data</button>
 
-      <div class="card" id="proCard"></div>
+      <div class="card" id="proCard" style="margin-top:1.4rem"></div>
 
       <div class="card">
-        <h2>Appearance</h2>
-        <div class="segmented" id="themePicker" role="radiogroup" aria-label="Appearance">
+        <div class="card-head"><h2>Appearance 🎨</h2><span class="label">neo-brutal</span></div>
+        <div class="segmented" id="themePicker" role="radiogroup" aria-label="Appearance" style="margin-top:.6rem">
           <button role="radio" data-theme-choice="system" aria-checked="true">📱 System</button>
           <button role="radio" data-theme-choice="light" aria-checked="false">☀️ Light</button>
           <button role="radio" data-theme-choice="dark" aria-checked="false">🌙 Dark</button>
         </div>
-        <p class="muted small">System follows your phone's dark mode setting.</p>
+        <p class="muted small">System follows your phone's dark mode.</p>
       </div>
 
       <div class="card">
-        <h2>Backup & share</h2>
-        <p class="muted">Export your saved places (including ones you added) to a file, or import a file from a friend.</p>
+        <h2>Backup & share 📡</h2>
+        <p class="muted">Save your places (including ones you added) to a file, or load one from a friend.</p>
         <div class="btn-row">
-          <button id="exportBtn" class="btn ghost">Export</button>
-          <label class="btn ghost" tabindex="0">Import<input id="importInput" type="file" accept="application/json,.json" hidden></label>
+          <button id="exportBtn" class="btn soft grow">⬆ Export</button>
+          <label class="btn soft grow" tabindex="0">⬇ Import<input id="importInput" type="file" accept="application/json,.json" hidden></label>
         </div>
+        <div class="pro-tip"><span>💡</span><span>pro tip: GPS works in airplane mode, and it saves battery while you walk.</span></div>
       </div>
 
-      <div class="card">
+      <div class="card soft">
         <h2>Tips</h2>
         <ul class="tips">
-          <li>GPS works without internet — keep location turned on.</li>
-          <li>Tap 🧭 to turn on the compass, then follow the arrow next to each place.</li>
-          <li>Map areas you look at while online are kept for offline use. Browse your area once on the Map tab (zoom in on the streets you need).</li>
-          <li>Many pan shops and tea stalls aren't on the map yet — tap <b>＋</b> to add one. It's saved only on your phone.</li>
+          <li>Tap 🧭 for the compass, then follow the arrow on each place.</li>
+          <li>Saved areas include places, roads and the full map, so search, routes and zooming all work offline.</li>
+          <li>Spotted a stall that isn't listed? Tap the orange <b>＋</b> to drop a pin. It stays on your phone.</li>
         </ul>
       </div>
 
-      <div class="card">
+      <div class="card soft">
         <h2>About</h2>
         <p class="muted small">Nearby Offline v__APP_VERSION__ · No account, no tracking. Your location never leaves your phone except to fetch map data for the area you choose.</p>
         <p class="small"><a href="privacy.html">Privacy policy</a> · <a id="supportLink" href="#" target="_blank" rel="noopener">Report a problem</a></p>
@@ -135,52 +160,72 @@
     </section>
   </main>
 
-  <button id="addBtn" class="fab" aria-label="Add a place">＋</button>
+  <div id="pointTicker" class="point-ticker" hidden></div>
 
   <nav class="tabs" aria-label="Views">
-    <button data-view="list" class="active" aria-current="page"><span aria-hidden="true">☰</span>Nearby</button>
-    <button data-view="map"><span aria-hidden="true">🗺️</span>Map</button>
-    <button data-view="areas"><span aria-hidden="true">⬇</span>Offline areas</button>
+    <button class="tab active" data-view="list" aria-current="page"><span aria-hidden="true">⚡</span>Nearby</button>
+    <button class="tab" data-view="map"><span aria-hidden="true">🗺</span>Map</button>
+    <button class="tab" data-view="areas"><span aria-hidden="true">📦</span>Saved</button>
+    <button id="addBtn" class="fab" aria-label="Add a place">📍</button>
   </nav>
 
+  <!-- Add a place -->
   <dialog id="addDialog" aria-labelledby="addTitle">
     <form method="dialog" id="addForm">
-      <h2 id="addTitle">Add a place</h2>
-      <label class="field">Name
-        <input name="name" required maxlength="80" placeholder="e.g. Raju Pan Bhandar">
-      </label>
-      <label class="field">Type
-        <select name="cat" id="addCat"></select>
-      </label>
-      <label class="field">Opening hours (optional)
-        <input name="hours" maxlength="100" placeholder="e.g. 08:00-23:00 or Mo-Sa 09:00-21:00">
-      </label>
-      <label class="field">Note (optional)
-        <input name="note" maxlength="140" placeholder="e.g. near temple gate, sells cold drinks">
+      <div class="sheet-head">
+        <div>
+          <h2 id="addTitle">drop a secret pin</h2>
+          <p class="muted small" style="margin:.3rem 0 0">spotted a stall that's not on the map? drop it here 📍</p>
+        </div>
+        <button value="cancel" class="icon-btn" formnovalidate aria-label="Close">✕</button>
+      </div>
+      <div class="privacy-row"><span>🔒 100% offline & private</span><span class="sticker lime flat">0 KB sent</span></div>
+
+      <label class="field"><span class="label">Place name *</span>
+        <input name="name" required maxlength="80" placeholder="Raju Pan Bhandar 🌿">
       </label>
       <fieldset class="field">
-        <legend>Location</legend>
-        <label><input type="radio" name="where" value="gps" checked> My current location</label>
-        <label><input type="radio" name="where" value="map"> Centre of the map</label>
+        <legend class="label">Category sticker *</legend>
+        <div class="cat-grid" id="addCat"></div>
       </fieldset>
-      <div class="btn-row end">
-        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
-        <button value="save" class="btn">Save</button>
-      </div>
+      <fieldset class="field">
+        <legend class="label">Pin position</legend>
+        <label class="where-opt"><input type="radio" name="where" value="gps" checked> 📍 My current location</label>
+        <label class="where-opt"><input type="radio" name="where" value="map"> 🎯 Centre of the map</label>
+      </fieldset>
+      <label class="field"><span class="label">Opening hours (optional)</span>
+        <input name="hours" maxlength="100" placeholder="e.g. 06:00-23:00 or Mo-Sa 09:00-21:00">
+      </label>
+      <label class="field"><span class="label"><span>Landmark note</span><span>max 140</span></span>
+        <textarea name="note" maxlength="140" placeholder="near temple gate, open late"></textarea>
+      </label>
+      <button value="save" class="btn lime big" style="margin-top:1.2rem">📌 Save offline pin</button>
+      <p class="muted small center">saved only on this phone · 0 KB data used</p>
     </form>
   </dialog>
 
+  <!-- Pro -->
   <dialog id="proDialog" aria-labelledby="proTitle">
     <form method="dialog">
-      <h2 id="proTitle">⭐ Nearby Pro</h2>
-      <p id="proReason"></p>
-      <p class="muted small">One-time purchase: unlimited saved areas and 10–20 km areas.</p>
-      <div class="btn-row end">
-        <button value="cancel" class="btn ghost">Not now</button>
-        <button value="buy" class="btn" id="proDialogBuy">Get Pro</button>
+      <p id="proReason" class="notice limit-alert"></p>
+      <div class="route-tags" style="margin-top:.8rem"><span class="sticker lime">⭐ lifetime pass · no subscription ever</span></div>
+      <div class="pro-head">
+        <h2 id="proTitle">Nearby Pro 🚀</h2>
+        <div class="price-sticker"><b id="proDialogPrice">₹79</b><small>≈ a plate of momos 🥟</small></div>
       </div>
+      <p class="muted pro-sub">One-time payment. No monthly fees, no login. Yours forever.</p>
+      <ul class="perks">
+        <li><span class="p-ico" style="background:var(--lime)">⚡</span><div><b>Unlimited saved packs</b><span>Save whole trips, many cities. Free keeps 2.</span></div></li>
+        <li><span class="p-ico" style="background:var(--blue-soft)">🗺️</span><div><b>Big 10 & 20 km packs</b><span>Whole old cities and ghats in one go.</span></div></li>
+        <li><span class="p-ico" style="background:var(--yellow)">💛</span><div><b>Indie & ad-free</b><span>No ads, no tracking. Your money keeps it that way.</span></div></li>
+      </ul>
+      <button value="buy" class="btn lime big" id="proDialogBuy">Get Pro</button>
+      <div class="pro-foot"><button value="cancel" class="btn link">Not now</button><span>UPI · cards via Google Play</span></div>
     </form>
   </dialog>
+
+  <!-- First-run onboarding -->
+  <div id="onboarding" class="onboarding" hidden role="dialog" aria-modal="true" aria-label="Welcome"></div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

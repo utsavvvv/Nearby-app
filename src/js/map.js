@@ -195,7 +195,7 @@ export class PlaceMap {
       transformRequest: (url) => (url.startsWith(`https://${MAP_HOST}/`) ? { url: url.replace('https://', `${PROTOCOL}://`) } : undefined),
     });
     this.map.touchZoomRotate.disableRotation();
-    this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+    this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     this.userMoved = false;
     // Remember when the person pans/zooms themselves, so GPS updates don't yank the map away.
     const mark = (e) => { if (e.originalEvent) this.userMoved = true; };
@@ -213,11 +213,13 @@ export class PlaceMap {
         this.map.addSource('route', { type: 'geojson', data: empty });
         // Google-Maps-like route: dark blue casing under a bright blue line; dashed when it's only a straight line.
         this.map.addLayer({ id: 'route-casing', type: 'line', source: 'route', filter: ['!=', ['get', 'straight'], true],
-          layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#1558b0', 'line-width': 9 } });
+          layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#111111', 'line-width': 11 } });
         this.map.addLayer({ id: 'route-line', type: 'line', source: 'route', filter: ['!=', ['get', 'straight'], true],
-          layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#4285f4', 'line-width': 6 } });
+          layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#3d5afe', 'line-width': 7 } });
+        this.map.addLayer({ id: 'route-dash', type: 'line', source: 'route', filter: ['!=', ['get', 'straight'], true],
+          layout: { 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-dasharray': [2, 3] } });
         this.map.addLayer({ id: 'route-straight', type: 'line', source: 'route', filter: ['==', ['get', 'straight'], true],
-          layout: { 'line-cap': 'round' }, paint: { 'line-color': '#4285f4', 'line-width': 4, 'line-dasharray': [1, 2] } });
+          layout: { 'line-cap': 'round' }, paint: { 'line-color': '#3d5afe', 'line-width': 5, 'line-dasharray': [1, 2] } });
       }
       if (this.accuracy) this.setAccuracy(...this.accuracy);
       if (this.route) this.setRoute(this.route);
@@ -243,7 +245,8 @@ export class PlaceMap {
       const el = document.createElement('button');
       el.className = 'pin-btn';
       el.setAttribute('aria-label', it.title);
-      el.innerHTML = `<span class="pin" style="background:${it.color}"><span>${it.icon}</span></span>`;
+      const text = it.label ? ` ${it.label.replace(/[&<>"']/g, '')}` : '';
+      el.innerHTML = `<span class="pin${it.label ? '' : ' dot'}" style="background:${it.color}"><span>${it.icon}</span>${text}</span>`;
       return new maplibregl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([it.lon, it.lat])
         .setPopup(new maplibregl.Popup({ offset: 28, closeButton: true, maxWidth: '260px' }).setHTML(it.popupHtml))

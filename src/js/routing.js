@@ -45,3 +45,37 @@ export function formatDuration(s) {
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)} h ${min % 60} min`;
 }
+
+/**
+ * A simple first instruction for a route line: which way to head, and the first real turn.
+ * @param {number[][]} coords [[lon, lat], ...]
+ * @returns {{ head: string, turn: 'left'|'right'|null, in: number, total: number }}
+ */
+export function firstInstruction(coords) {
+  const segs = [];
+  for (let i = 1; i < coords.length; i++) {
+    const [lo1, la1] = coords[i - 1]; const [lo2, la2] = coords[i];
+    const len = distance(la1, lo1, la2, lo2);
+    if (len < 3) continue; // ignore tiny jitters
+    segs.push({ len, b: bearingDeg(la1, lo1, la2, lo2) });
+  }
+  const total = segs.reduce((s, x) => s + x.len, 0);
+  if (!segs.length) return { head: 'N', turn: null, in: 0, total };
+  let walked = 0;
+  for (let i = 1; i < segs.length; i++) {
+    walked += segs[i - 1].len;
+    const diff = ((segs[i].b - segs[i - 1].b + 540) % 360) - 180;
+    if (Math.abs(diff) > 35 && walked >= 10) return { head: point(segs[0].b), turn: diff > 0 ? 'right' : 'left', in: walked, total };
+  }
+  return { head: point(segs[0].b), turn: null, in: total, total };
+}
+
+function bearingDeg(la1, lo1, la2, lo2) {
+  const r = Math.PI / 180;
+  const y = Math.sin((lo2 - lo1) * r) * Math.cos(la2 * r);
+  const x = Math.cos(la1 * r) * Math.sin(la2 * r) - Math.sin(la1 * r) * Math.cos(la2 * r) * Math.cos((lo2 - lo1) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+
+const POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const point = (b) => POINTS[Math.round(b / 45) % 8];

@@ -3,7 +3,7 @@ import { distance, bearing, compassPoint, formatDistance, walkTime } from './geo
 import * as db from './db.js';
 import { fetchPlaces, fetchRoads } from './overpass.js';
 import { buildGraph, shortestPath, GRAPH_VERSION } from './graph.js';
-import { fetchRoute, straightLine, formatDuration } from './routing.js';
+import { fetchRoute, straightLine, formatDuration, firstInstruction } from './routing.js';
 import { isOpenAt } from './hours.js';
 import { sanitizePlace, sanitizeRegion } from './model.js';
 import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache, downloadAreaMap, removeAreaMap } from './map.js';
@@ -12,7 +12,7 @@ import { hotelUrl, areaHotelsUrl } from './hotels.js';
 import { ProStore } from './pro.js';
 import { getTheme, setTheme, onThemeChange } from './theme.js';
 import {
-  DEFAULT_CENTER, DEFAULT_COUNTRY, MAX_ROAD_RADIUS, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
+  DEFAULT_CENTER, DEFAULT_COUNTRY, PRO_PRICE_HINT, MAX_ROAD_RADIUS, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
 } from './config.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -84,9 +84,10 @@ async function fetchJson(url, ms = NOMINATIM_TIMEOUT_MS) {
 // ---------- online / offline ----------
 function updateNet() {
   const pill = $('#netStatus');
-  pill.textContent = navigator.onLine ? 'Online' : 'Offline';
+  pill.textContent = navigator.onLine ? 'online 📶' : 'offline mode 🔌';
   pill.classList.toggle('offline', !navigator.onLine);
   renderBanner();
+  renderHero();
 }
 window.addEventListener('online', updateNet);
 window.addEventListener('online', () => setTimeout(() => upgradeRoads(), 3000));
@@ -94,11 +95,13 @@ window.addEventListener('offline', updateNet);
 
 // ---------- location ----------
 function updateLocStatus(msg) {
-  if (msg) { $('#locStatus').textContent = msg; return; }
+  if (msg) { $('#locStatus').textContent = `📍 ${msg}`; return; }
   const p = state.pos;
-  if (!p) { $('#locStatus').textContent = 'Location unknown — turn on GPS'; return; }
-  const acc = p.manual ? 'set by you' : `±${Math.round(p.acc)} m`;
-  $('#locStatus').textContent = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)} · ${acc} · ${timeAgo(p.ts)}`;
+  if (!p) { $('#locStatus').textContent = '📍 location unknown, turn on GPS'; return; }
+  const where = areaNameFor(p.lat, p.lon) || `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
+  const acc = p.manual ? 'set by you' : `±${Math.round(p.acc)}m`;
+  $('#locStatus').textContent = `📍 ${where} · ${acc}`;
+  $('#locStatus').title = `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · updated ${timeAgo(p.ts)}`;
 }
 
 let gpsWatch = null;
@@ -115,7 +118,7 @@ function startGps() {
       if (!prev || prev.manual || distance(prev.lat, prev.lon, state.pos.lat, state.pos.lon) > 8) render();
       updateMeMarker();
       // Keep the open map on the user as they walk, unless they've moved the map themselves.
-      if (map && state.view === 'map' && !map.userMoved) map.setView([state.pos.lat, state.pos.lon]);
+      if (map && state.view === 'map' && (!map.userMoved || state.route?.nav)) map.setView([state.pos.lat, state.pos.lon]);
       // Re-plan the route as the user walks (online routes less often, to spare the server).
       const r = state.route;
       if (r?.from) {
@@ -186,7 +189,28 @@ function scheduleArrowUpdate() {
     document.querySelectorAll('[data-bearing]').forEach((el) => {
       el.style.transform = `rotate(${arrowAngle(Number(el.dataset.bearing))}deg)`;
     });
+    renderCompass();
   });
+}
+
+/** Heading card on the list, heading chip on the map, and the "point your phone" ticker. */
+function renderCompass() {
+  const card = $('#compassCard');
+  const chip = $('#mapHeading');
+  const h = state.heading;
+  card.hidden = !compassOn;
+  chip.hidden = !compassOn || h == null;
+  if (compassOn) {
+    const head = h == null ? 'waiting for compass…' : `heading ${String(Math.round(h)).padStart(3, '0')}° ${compassPoint(h)} · walking mode`;
+    card.innerHTML = `<span class="dial"><span style="transform:rotate(${-(h ?? 0)}deg)">🧭</span></span>
+      <span class="grow"><b>${head}</b><span class="muted small">phone sensor · works offline</span></span>
+      <span class="sticker lime flat">active</span>`;
+    if (h != null) chip.textContent = `▲ ${Math.round(h)}° ${compassPoint(h)}`;
+  }
+  const ticker = $('#pointTicker');
+  const open = compassOn && state.view === 'list' && state.openId ? lastShown.find((p) => p.id === state.openId) : null;
+  ticker.hidden = !(open && open.d != null);
+  if (!ticker.hidden) ticker.textContent = `🧭 point phone toward ${displayName(open)} (${formatDistance(open.d)})`;
 }
 
 // ---------- filtering ----------
@@ -226,71 +250,108 @@ function renderChips() {
   }).join('');
 }
 
-const ARROW_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2l7 19-7-4-7 4z" fill="currentColor"/></svg>';
+const ARROW_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2l7 19-7-4-7 4z" fill="currentColor"/></svg>';
+
+function distHtml(m) {
+  const t = formatDistance(m);
+  const [n, unit] = t.split(' ');
+  return `${n}<small>${unit}</small>`;
+}
 
 function placeItem(p) {
   const cat = CATEGORY_BY_ID[p.cat];
   const hasPos = p.d != null;
+  const isOpen = state.openId === p.id;
   const geoUrl = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}(${encodeURIComponent(displayName(p))})`;
   const kind = p.kind && !cat.label.toLowerCase().includes(p.kind) ? p.kind : '';
   const openBadge = p.open === true ? '<span class="badge open">Open now</span>' : p.open === false ? '<span class="badge closed">Closed</span>' : '';
-  return `<li class="place ${state.openId === p.id ? 'open' : ''}" data-id="${esc(p.id)}">
-    <button class="place-main" aria-expanded="${state.openId === p.id}">
-      <span class="ico" style="background:${cat.color}22" aria-hidden="true">${cat.icon}</span>
+  const walk = hasPos ? `bas ${walkTime(p.d).replace(' walk', '')} walk` : '';
+  const sub = [walk, p.note || kind].filter(Boolean).join(' · ');
+  const foot = p.hours ? `🕒 ${esc(p.hours)}` : p.address ? `🏠 ${esc(p.address)}` : esc(cat.label);
+  return `<li class="place ${isOpen ? 'open' : ''} ${p.source === 'user' ? 'user' : ''}" data-id="${esc(p.id)}">
+    <button class="place-main" aria-expanded="${isOpen}">
+      <span class="ico" style="background:${cat.color}2e" aria-hidden="true">${cat.icon}</span>
       <span class="body">
-        <span class="name">${esc(displayName(p))}${p.source === 'user' ? '<span class="tag-user">added by you</span>' : ''}</span>
-        <span class="meta">${openBadge}${esc([cat.label, kind].filter(Boolean).join(' · '))}</span>
+        <span class="cat-line">${cat.icon} ${esc(cat.label)} ${openBadge}</span>
+        <span class="name">${esc(displayName(p))}</span>
+        ${sub ? `<span class="meta">${esc(sub)}</span>` : ''}
       </span>
       <span class="dist">${hasPos
-        ? `<span class="arrow" data-bearing="${p.b.toFixed(1)}" style="transform:rotate(${arrowAngle(p.b)}deg)">${ARROW_SVG}</span><b>${formatDistance(p.d)}</b><span class="meta">${compassPoint(p.b)}</span>`
+        ? `<b>${distHtml(p.d)}</b><span class="dir-box"><span class="arrow" data-bearing="${p.b.toFixed(1)}" style="transform:rotate(${arrowAngle(p.b)}deg)">${ARROW_SVG}</span>${compassPoint(p.b)}</span>`
         : '<span class="meta">—</span>'}</span>
     </button>
+    <div class="place-foot"><span>${foot}</span><button class="btn small nav-btn" data-act="route">Navigate ›</button></div>
     <div class="details">
-      ${p.localName ? `<p>🔤 ${esc(p.localName)}</p>` : ''}
-      ${p.hours ? `<p>🕒 ${esc(p.hours)}</p>` : ''}
-      ${p.address ? `<p>🏠 ${esc(p.address)}</p>` : ''}
-      ${p.note ? `<p>📝 ${esc(p.note)}</p>` : ''}
-      ${p.phone ? `<p>📞 <a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a></p>` : ''}
-      ${hasPos ? `<p>🚶 ${walkTime(p.d)} · head ${compassPoint(p.b)} (${Math.round(p.b)}°)</p>` : ''}
-      <p class="muted small">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</p>
-      <div class="btn-row">
-        <button class="btn small" data-act="route">🧭 Route</button>
-        <button class="btn small ghost" data-act="map">🗺️ Show on map</button>
-        <button class="btn small ghost" data-act="ext" data-url="${esc(geoUrl)}">📲 Open in maps app</button>
-        ${p.source === 'user' ? '<button class="btn small danger" data-act="delete">Delete</button>' : ''}
+      <div class="info-box">
+        ${hasPos ? `<p><span>↗</span><span>Head ${compassPoint(p.b)} (${Math.round(p.b)}°) · ${formatDistance(p.d)}, ${walkTime(p.d)}</span></p>` : ''}
+        ${p.address ? `<p><span>🏠</span><span>${esc(p.address)}</span></p>` : ''}
+        ${p.hours ? `<p><span>🕒</span><span>${esc(p.hours)}</span></p>` : ''}
+        ${p.localName ? `<p><span>🔤</span><span>${esc(p.localName)}</span></p>` : ''}
+        ${p.note ? `<p><span>📝</span><span>${esc(p.note)}</span></p>` : ''}
+        ${p.phone ? `<p><span>📞</span><a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a></p>` : ''}
+        <p class="muted small"><span>📌</span><span>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${p.source === 'user' ? ' · added by you' : ''}</span></p>
       </div>
+      <button class="btn lime big" data-act="route">🧭 Offline route${hasPos ? ` (${formatDistance(p.d)})` : ''}</button>
+      <div class="btn-row nowrap">
+        <button class="btn small soft grow" data-act="map">🗺️ Show on map</button>
+        <button class="btn small blue grow" data-act="ext" data-url="${esc(geoUrl)}">📲 Open in maps app</button>
+      </div>
+      ${p.source === 'user' ? '<button class="btn small danger" data-act="delete">🗑 Delete this pin</button>' : ''}
       ${p.cat === 'stay' && navigator.onLine ? `<div class="partner">
-        <button class="btn small partner-btn" data-act="ext" data-url="${esc(hotelUrl(p, areaNameFor(p.lat, p.lon)))}">🏨 Check prices &amp; book</button>
-        <span class="muted small">Opens Booking.com. We may earn a commission, at no extra cost to you.</span>
+        <button class="btn partner-btn" data-act="ext" data-url="${esc(hotelUrl(p, areaNameFor(p.lat, p.lon)))}">🏨 Check prices &amp; book ↗</button>
+        <span class="muted small">Opens Booking.com · partner link, we may earn a commission at no extra cost to you.</span>
       </div>` : ''}
     </div>
   </li>`;
 }
 
+let offlineCardDismissed = false; // set by the dismiss button
 function renderBanner(gpsError) {
   const b = $('#banner');
   if (!b) return;
+  b.hidden = false;
   if (!state.places.length) {
-    b.hidden = false;
-    b.innerHTML = navigator.onLine
-      ? '<b>No places saved yet.</b><br>Save the area around you now so it works later without internet.<br><button class="btn small" id="bannerDl">⬇ Save area around me</button>'
-      : '<b>No places saved yet.</b><br>Connect to the internet once to save an area, or tap ＋ to add places you find.';
+    b.innerHTML = `<div class="card empty-card">
+      <div class="empty-art" aria-hidden="true">📍<span class="sticker pink s1 tilt-r">no pins</span><span class="sticker s2 tilt-l">0 MB cached</span></div>
+      <h3>no places saved yet</h3>
+      <p class="muted">${navigator.onLine ? 'save your area while you\'ve got wifi 📶 and explore freely when the network dies in the galis!' : 'connect to the internet once to save your area, or tap 📍 to drop pins yourself.'}</p>
+      ${navigator.onLine ? '<button class="btn primary big" id="bannerDl">⬇ Download my area now</button>' : ''}
+    </div>`;
     return;
   }
   if (!state.pos) {
-    b.hidden = false;
-    b.innerHTML = gpsError
-      ? 'Location permission is off. Allow location for this app in your phone settings, or open the Map tab and tap “Set my location here”.'
-      : 'Waiting for your location. Turn on GPS, or open the Map tab and tap “Set my location here”.';
+    b.innerHTML = `<div class="notice">${gpsError
+      ? '📍 Location permission is off. Allow it in your phone settings, or open the Map and tap “Set my location here”.'
+      : '📍 Waiting for your location. Turn on GPS, or open the Map and tap “Set my location here”.'}</div>`;
     return;
   }
   const inside = state.regions.some((r) => distance(r.lat, r.lon, state.pos.lat, state.pos.lon) <= r.radius);
   if (!inside && state.regions.length) {
-    b.hidden = false;
-    b.innerHTML = `You are outside your saved areas, so some nearby places may be missing.${navigator.onLine ? '<br><button class="btn small" id="bannerDl">⬇ Save this area too</button>' : ''}`;
+    b.innerHTML = `<div class="notice">👀 you're outside your saved areas, so some spots may be missing.${navigator.onLine ? '<br><button class="btn small primary" id="bannerDl">⬇ Save this area too</button>' : ''}</div>`;
+    return;
+  }
+  if (!navigator.onLine && !offlineCardDismissed) {
+    b.innerHTML = `<div class="offline-card">
+      <span class="sticker ink flat">0 bars · offline</span>
+      <button class="icon-btn x" id="offlineDismiss" aria-label="Dismiss">✕</button>
+      <h3>you're offline. everything saved still works 💪</h3>
+      <span class="small">places, routes and the map are on your phone.</span>
+    </div>`;
     return;
   }
   b.hidden = true;
+}
+
+/** The orange hero banner + "found N spots" line. */
+function renderHero() {
+  const covered = state.pos && state.regions.some((r) => r.mapSaved && distance(r.lat, r.lon, state.pos.lat, state.pos.lon) <= r.radius);
+  $('#heroTag').hidden = !covered;
+  const line = $('#foundLine');
+  if (!state.pos || !lastShown.length) { line.hidden = true; return; }
+  const near = lastShown.filter((p) => p.d != null && p.d <= 1000).length;
+  const where = areaNameFor(state.pos.lat, state.pos.lon);
+  line.hidden = false;
+  line.innerHTML = `found <u>${near} spot${near === 1 ? '' : 's'}</u> within 1 km 👀${where ? ` · around <b>${esc(where)}</b>` : ''}`;
 }
 
 /** Name of the saved area that contains a point (used for hotel searches). */
@@ -308,19 +369,39 @@ function renderHotelCard() {
   const here = state.pos ? areaNameFor(state.pos.lat, state.pos.lon) : '';
   card.hidden = !(state.cat === 'stay' && navigator.onLine && here);
   if (card.hidden) return;
-  card.innerHTML = `<div><b>Looking for a room in ${esc(here)}?</b><br><span class="muted small">Compare prices and book online. Partner link: we may earn a commission, at no extra cost to you.</span></div>
-    <button class="btn small partner-btn" data-act="ext" data-url="${esc(areaHotelsUrl(here))}">Compare hotels</button>`;
+  card.innerHTML = `<div class="route-tags"><span class="sticker orange">partner 🤝</span><span class="sticker lime tilt-r">travel deal</span></div>
+    <h3>looking for a room in ${esc(here)}? 🛏️ compare prices</h3>
+    <button class="btn primary" data-act="ext" data-url="${esc(areaHotelsUrl(here))}">Compare hotels ↗</button>
+    <span class="muted small">ⓘ partner link: we may earn a commission, at no extra cost to you.</span>`;
 }
 
+let lastShown = []; // the places currently in the list (with distance/bearing)
 function renderList() {
   renderHotelCard();
   const items = filteredPlaces();
   const shown = items.slice(0, MAX_LIST);
+  lastShown = shown;
   $('#list').innerHTML = shown.map(placeItem).join('')
-    || (state.places.length ? '<li class="muted center empty">Nothing matches. Try another category or search.</li>' : '');
+    || (state.places.length ? '<li class="notice center">nothing matches 🤷 try another category or search.</li>' : '');
   const more = $('#listMore');
   more.hidden = items.length <= MAX_LIST;
   more.textContent = `Showing the nearest ${MAX_LIST} of ${items.length}. Pick a category or search to narrow down.`;
+  renderPackCard();
+  renderHero();
+  renderCompass();
+}
+
+/** "Offline pack" summary card at the end of the list. */
+function renderPackCard() {
+  const card = $('#packCard');
+  const r = state.pos && state.regions
+    .filter((x) => distance(x.lat, x.lon, state.pos.lat, state.pos.lon) <= x.radius)
+    .sort((a, b) => b.savedAt - a.savedAt)[0];
+  card.hidden = !r;
+  if (!r) return;
+  card.innerHTML = `<span class="ico" style="background:var(--orange)">📦</span>
+    <span class="grow"><b>${esc(r.name)} offline pack</b><span class="muted small">${r.count} spots${r.roads ? ' · routes' : ''}${r.mapSaved ? ' · map' : ''} · synced ${timeAgo(r.savedAt)}</span></span>
+    <button class="btn small lime" data-pack-sync="${esc(r.id)}">Sync ⚡</button>`;
 }
 
 function render() {
@@ -369,17 +450,27 @@ function renderMarkers() {
     .map((p) => ({ p, dc: distance(c.lat, c.lon, p.lat, p.lon) }))
     .sort((a, b) => a.dc - b.dc)
     .slice(0, MAX_MARKERS)
-    .map(({ p }) => {
+    .map(({ p }, i) => {
       const cat = CATEGORY_BY_ID[p.cat];
       const dist = p.d != null ? `<br>${formatDistance(p.d)} ${compassPoint(p.b)}` : '';
-      const open = p.open === true ? '<br><span class="badge open">Open now</span>' : p.open === false ? '<br><span class="badge closed">Closed</span>' : '';
+      const open = p.open === true ? ' <span class="badge open">Open now</span>' : p.open === false ? ' <span class="badge closed">Closed</span>' : '';
+      // The nearest ones get a name label sticker; the rest a small round sticker.
+      const short = displayName(p).split(/[,(]/)[0].split(' ').slice(0, 2).join(' ');
+      const label = i < 20 && map.getZoom() >= 15 ? `${short}${p.d != null ? ` ${formatDistance(p.d).replace(' ', '')}` : ''}` : '';
       return {
-        lat: p.lat, lon: p.lon, color: cat.color, icon: cat.icon, title: displayName(p),
-        popupHtml: `<b>${esc(displayName(p))}</b><br>${esc(cat.label)}${open}${p.hours ? `<br>🕒 ${esc(p.hours)}` : ''}${p.note ? `<br>📝 ${esc(p.note)}` : ''}${dist}<br><button class="btn small popup-route" data-route="${esc(p.id)}">🧭 Route</button>`,
+        lat: p.lat, lon: p.lon, color: STICKER_COLORS[p.cat] || '#ffffff', icon: cat.icon, title: displayName(p), label,
+        popupHtml: `<b>${esc(displayName(p))}</b><br>${esc(cat.label)}${open}${p.hours ? `<br>🕒 ${esc(p.hours)}` : ''}${p.note ? `<br>📝 ${esc(p.note)}` : ''}${dist}<br><button class="btn small lime popup-route" data-route="${esc(p.id)}">🧭 Route</button>`,
       };
     });
   map.setMarkers(items);
 }
+
+// Bright sticker colours for map pins (text stays ink on all of them).
+const STICKER_COLORS = {
+  pan: '#c6ff3d', grocery: '#ff8a1f', tea: '#ffb783', food: '#ffde59', pharmacy: '#ff9cc8', atm: '#bbc3ff',
+  medical: '#ff8f87', toilets: '#5cffc1', water: '#9be7ff', education: '#c9b6ff', stay: '#ffd0f0',
+  transport: '#d6d6d6', fuel: '#ffe08a', police: '#a9c4ff', other: '#ffffff',
+};
 
 // ---------- routes ----------
 let graphCache = null; // { id, g }
@@ -512,16 +603,20 @@ async function updateRoute(fit) {
     try { await saveTripRoads(from, to); g = await graphFor(from, to); } catch { /* use the online service below */ }
     if (state.route !== r) return;
   }
+  let alt = null; // time for the other mode, shown on the Walk / Drive toggle
   if (g) {
     const sp = shortestPath(g, from, to, r.mode);
-    if (sp) { result = { ...sp, straight: false }; source = 'offline'; }
+    if (sp) {
+      result = { ...sp, straight: false }; source = 'offline';
+      alt = shortestPath(g, from, to, r.mode === 'walk' ? 'drive' : 'walk')?.duration ?? null;
+    }
   }
   if (!result && navigator.onLine) {
     try { result = await fetchRoute(from, to, r.mode); source = 'online'; } catch { /* fall back below */ }
   }
   if (!result) result = straightLine(from, to, r.mode);
   if (state.route !== r) return; // the user picked another place meanwhile
-  Object.assign(r, { result, source, from, hadRoads: Boolean(g) });
+  Object.assign(r, { result, source, from, hadRoads: Boolean(g), alt });
   map.setRoute(result);
   renderRoutePanel();
   if (fit) { map.fitPoints(result.coords, routePanelSpace()); map.userMoved = true; }
@@ -543,18 +638,57 @@ function renderRoutePanel(message) {
         : 'Straight line: the roads here aren\'t saved yet. Open this route once while online and they will be saved for offline use.',
   };
   const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${r.place.lat},${r.place.lon}&travelmode=${r.mode === 'drive' ? 'driving' : 'walking'}`;
+  const time = (mode) => {
+    if (!res) return '';
+    const d = mode === r.mode ? res.duration : r.alt;
+    return d != null ? ` (${formatDuration(d)})` : '';
+  };
+  let step = '';
+  if (res && !res.straight) {
+    const i = firstInstruction(res.coords);
+    step = i.turn
+      ? `Head ${i.head}, then turn ${i.turn} in ${formatDistance(i.in)}`
+      : `Head ${i.head} for ${formatDistance(i.total)} to arrive`;
+  } else if (res) {
+    step = `Head ${compassPoint(bearing(r.from.lat, r.from.lon, r.place.lat, r.place.lon))} · ${formatDistance(res.distance)} as the crow flies`;
+  }
+  const offline = r.source === 'offline';
   panel.hidden = false;
+  panel.classList.toggle('nav-mode', Boolean(r.nav));
   panel.innerHTML = `<div class="route-head">
-      <span class="route-dest">${cat.icon} <b>${esc(displayName(r.place))}</b></span>
+      <div>
+        <div class="route-tags hide-in-nav"><span class="sticker blue-soft">${cat.icon} ${esc(cat.label)}</span>${offline ? '<span class="sticker lime tilt-r">saved offline</span>' : ''}</div>
+        <div class="route-dest">${esc(displayName(r.place))}</div>
+      </div>
       <button class="icon-btn route-close" data-route-act="close" aria-label="Close route">✕</button>
     </div>
-    <div class="segmented route-modes" role="radiogroup" aria-label="Travel mode">
-      <button role="radio" data-route-mode="walk" aria-checked="${r.mode === 'walk'}">🚶 Walk</button>
-      <button role="radio" data-route-mode="drive" aria-checked="${r.mode === 'drive'}">🚗 Drive</button>
+    <div class="segmented route-modes hide-in-nav" role="radiogroup" aria-label="Travel mode">
+      <button role="radio" data-route-mode="walk" aria-checked="${r.mode === 'walk'}">🚶 Walk${time('walk')}</button>
+      <button role="radio" data-route-mode="drive" aria-checked="${r.mode === 'drive'}">🚗 Drive${time('drive')}</button>
     </div>
-    ${message ? `<p class="muted small">${esc(message)}</p>` : res ? `<p class="route-sum"><b>${formatDuration(res.duration)}</b> · ${formatDistance(res.distance)}</p>
-      <p class="muted small route-note">${esc(notes[r.source])}</p>` : ''}
-    <button class="btn small ghost" data-route-act="ext" data-url="${esc(gmaps)}">↗ Turn-by-turn in Google Maps</button>`;
+    ${message ? `<p class="muted small">${esc(message)}</p>` : res ? `<p class="route-sum"><b>${formatDuration(res.duration)}</b> · ${formatDistance(res.distance)}${r.mode === 'walk' ? `<span class="sticker peach flat">~${Math.round(res.distance / 0.75).toLocaleString('en-IN')} steps</span>` : ''}</p>
+      <div class="info-box"><p><span>↱</span><span>${esc(step)}</span></p>
+        <p class="small route-note"><span>${offline ? '✅' : 'ⓘ'}</span><span>${esc(notes[r.source])}</span></p></div>` : ''}
+    ${res && !message ? (r.nav
+    ? '<button class="btn big" data-route-act="endnav">■ End navigation</button>'
+    : `<button class="btn lime big" data-route-act="nav">🧭 Start ${offline ? 'offline ' : ''}navigation</button>`) : ''}
+    <div class="route-links hide-in-nav"><button class="btn link" data-route-act="ext" data-url="${esc(gmaps)}">Turn-by-turn in Google Maps ↗</button></div>`;
+}
+
+/** Follow the user on the map along the route. */
+function startNavigation(on) {
+  const r = state.route;
+  if (!r) return;
+  r.nav = on;
+  renderRoutePanel();
+  if (on && state.pos && map) {
+    map.setView([state.pos.lat, state.pos.lon], 17);
+    map.userMoved = false;
+    toast('🧭 navigation on: the map follows you');
+  } else if (map && r.result) {
+    map.fitPoints(r.result.coords, routePanelSpace());
+    map.userMoved = true;
+  }
 }
 
 /** Show the map centred on the user (or on a given spot), following GPS until they pan. */
@@ -579,13 +713,12 @@ function centreMap(target) {
 function showView(view, mapTarget) {
   state.view = view;
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
-  document.querySelectorAll('.tabs button').forEach((b) => {
+  document.querySelectorAll('.tabs [data-view]').forEach((b) => {
     const on = b.dataset.view === view;
     b.classList.toggle('active', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
   $('#chips').hidden = view === 'areas';
-  $('#addBtn').hidden = view === 'areas';
   if (view === 'map') {
     // Wait one frame so the map's container has its real size before centring.
     if (initMap()) requestAnimationFrame(() => centreMap(mapTarget));
@@ -602,7 +735,14 @@ async function requestPersistentStorage() {
 
 function setDownloading(on) {
   ['#dlHereBtn', '#dlMapBtn'].forEach((s) => { $(s).disabled = on; });
-  $('#dlCancelBtn').hidden = !on;
+  $('#dlProgress').hidden = !on;
+  if (on) setProgress('Saving…', 0.02);
+}
+
+/** Progress card: label + striped bar (fraction 0..1). */
+function setProgress(label, fraction) {
+  $('#dlProgressLabel').textContent = label;
+  $('#dlProgressBar').style.width = `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
 }
 
 async function downloadArea(lat, lon, label) {
@@ -621,7 +761,8 @@ async function downloadArea(lat, lon, label) {
   const ctrl = new AbortController();
   state.download = ctrl;
   setDownloading(true);
-  status.textContent = `Downloading places within ${radius / 1000} km… this can take up to a minute.`;
+  status.textContent = `Downloading places within ${radius / 1000} km… this can take a minute or two.`;
+  setProgress('Saving places…', 0.08);
   try {
     const places = await fetchPlaces(lat, lon, radius, id, { signal: ctrl.signal });
     const region = { id, lat, lon, radius, name: label || `Area at ${lat.toFixed(3)}, ${lon.toFixed(3)}`, count: places.length, savedAt: Date.now() };
@@ -630,6 +771,7 @@ async function downloadArea(lat, lon, label) {
     requestPersistentStorage();
     // Roads for offline routes. If this part fails the places are still saved.
     status.textContent = `Saved ${places.length} places. Now saving roads for offline routes…`;
+    setProgress('Saving roads for routes…', 0.25);
     let roadsNote = '';
     try {
       await saveRegionRoads(region, ctrl.signal);
@@ -641,7 +783,11 @@ async function downloadArea(lat, lon, label) {
     status.textContent = 'Saving the map for offline use… 0%';
     let mapNote = '';
     try {
-      await saveRegionMap(region, ctrl.signal, (f) => { status.textContent = `Saving the map for offline use… ${Math.round(f * 100)}%`; });
+      setProgress('Saving map for offline… 0%', 0.4);
+      await saveRegionMap(region, ctrl.signal, (f) => {
+        status.textContent = `Saving the map for offline use… ${Math.round(f * 100)}%`;
+        setProgress(`Saving map for offline… ${Math.round(f * 100)}%`, 0.4 + f * 0.6);
+      });
     } catch (err) {
       if (ctrl.signal.aborted) throw err;
       mapNote = ' The map could not be saved fully; it will be retried when you are online.';
@@ -782,32 +928,48 @@ async function findTowns(q, cc) {
   return out.slice(0, 5);
 }
 
+const PACK_ICONS = ['🏛️', '🛍️', '🍜', '🛕', '🏞️', '🚉'];
 async function renderRegions() {
   const ul = $('#regions');
   const userCount = state.places.filter((p) => p.source === 'user').length;
   const staleMs = STALE_AFTER_DAYS * 86400000;
-  ul.innerHTML = state.regions.length
-    ? [...state.regions].sort((a, b) => b.savedAt - a.savedAt).map((r) => `<li data-id="${esc(r.id)}">
-        <div><div class="r-name">${esc(r.name)}</div>
-        <div class="muted small">${r.count} places · ${r.radius / 1000} km · ${r.roads ? 'routes ✓' : 'no routes yet'} · ${r.mapSaved ? 'map ✓' : 'map not saved yet'} · saved ${timeAgo(r.savedAt)}${Date.now() - r.savedAt > staleMs ? ' · <b>refresh recommended</b>' : ''}</div></div>
-        <div class="btn-row nowrap">
-          <button class="btn small ghost" data-act="refresh" aria-label="Download ${esc(r.name)} again">↻</button>
-          <button class="btn small danger" data-act="del">Delete</button>
-        </div></li>`).join('')
-    : '<li class="muted">No areas saved yet.</li>';
-  if (userCount) ul.insertAdjacentHTML('beforeend', `<li><div><div class="r-name">Added by you</div><div class="muted small">${userCount} places</div></div></li>`);
-  const tiles = await cachedMapFileCount();
-  let usage = '';
-  try {
-    if (navigator.storage?.estimate) usage = ` Storage used: about ${((await navigator.storage.estimate()).usage / 1048576).toFixed(1)} MB.`;
-  } catch { /* ignore */ }
-  $('#storage').textContent = `${tiles} map files saved for offline viewing.${usage}`;
+  const packs = [...state.regions].sort((a, b) => b.savedAt - a.savedAt);
+  $('#regionsTitle').textContent = `Saved areas (${packs.length} pack${packs.length === 1 ? '' : 's'}) 📦`;
+  $('#placesSticker').textContent = `${state.places.length} spots`;
+  $('#gpsSticker').textContent = state.pos ? 'GPS ready' : 'no GPS yet';
+  ul.innerHTML = packs.length
+    ? packs.map((r, i) => {
+      const ready = r.roads && r.mapSaved;
+      const status = ready ? '<span class="sticker lime flat">100% ready ✓</span>'
+        : `<span class="sticker yellow flat">${navigator.onLine ? 'updating…' : 'partial'}</span>`;
+      const stale = Date.now() - r.savedAt > staleMs ? ' · <b>refresh recommended</b>' : '';
+      return `<li class="pack" data-id="${esc(r.id)}">
+        <span class="pack-ico" aria-hidden="true">${PACK_ICONS[i % PACK_ICONS.length]}</span>
+        <div><div class="r-name">${esc(r.name)}</div>${status}
+          <div class="pack-meta">${r.count} places · ${r.radius / 1000} km · ${r.roads ? 'routes ✓' : 'no routes yet'} · ${r.mapSaved ? 'map ✓' : 'map not saved yet'}${stale}</div></div>
+        <div class="pack-actions">
+          <div class="btn-row nowrap">
+            <button class="icon-btn" data-act="refresh" aria-label="Download ${esc(r.name)} again">↻</button>
+            <button class="icon-btn del" data-act="del" aria-label="Delete">🗑</button>
+          </div>
+          <span class="muted small">saved ${timeAgo(r.savedAt)}</span>
+        </div></li>`;
+    }).join('')
+    : '<li class="empty muted">No areas saved yet.</li>';
+  if (userCount) ul.insertAdjacentHTML('beforeend', `<li class="pack"><span class="pack-ico">📌</span><div><div class="r-name">Your pins</div><div class="pack-meta">${userCount} places you added</div></div><span></span></li>`);
+  const files = await cachedMapFileCount();
+  let mb = null;
+  try { if (navigator.storage?.estimate) mb = (await navigator.storage.estimate()).usage / 1048576; } catch { /* ignore */ }
+  $('#storage').textContent = `${files} map files saved for offline viewing.${mb != null ? ` Storage used: about ${mb.toFixed(1)} MB.` : ''}`;
+  $('#storageSticker').textContent = mb != null ? `${mb.toFixed(1)} MB used` : `${files} map files`;
 }
 
 // ---------- add / delete user places ----------
 function openAddDialog() {
   $('#addForm').reset();
-  if (state.cat !== 'all') $('#addCat').value = state.cat;
+  const pick = state.cat !== 'all' ? state.cat : 'pan';
+  const opt = $(`#addCat input[value="${pick}"]`);
+  if (opt) opt.checked = true;
   if (state.view === 'map' || !state.pos) $('#addForm').where.value = 'map';
   $('#addDialog').showModal();
 }
@@ -894,36 +1056,70 @@ function registerServiceWorker() {
 // ---------- data ----------
 async function loadData() {
   [state.places, state.regions] = await Promise.all([db.getAll('places'), db.getAll('regions')]);
+  if (state.pos) updateLocStatus();
   render();
   if (state.view === 'areas') renderRegions();
 }
 
+function renderRadiusTiles() {
+  const v = $('#radius').value;
+  document.querySelectorAll('#radiusTiles [data-radius]').forEach((t) => t.setAttribute('aria-checked', String(t.dataset.radius === v)));
+}
+
+// ---------- first-run onboarding ----------
+const SLIDES = [
+  { icon: '📡', tags: ['zero tracking 🛡️', 'airplane ready ✈️'], title: 'works with zero signal 📡❌', text: 'No 5G? No problem. Places, roads and the street map are saved on your phone before you step out.' },
+  { icon: '🌿', tags: ['pan · chai · ATM', '1 tap'], title: 'find pan, chai, ATMs in seconds ⚡', text: 'Nearest first, with distance and an arrow that points the way. Search “school” or “chemist” too.' },
+  { icon: '🧭', tags: ['offline routes', 'walk / drive'], title: 'routes that work offline 🗺️', text: 'Tap Route for a blue line along real roads, even in airplane mode.' },
+];
+function showOnboarding(i = 0) {
+  const el = $('#onboarding');
+  const s = SLIDES[i];
+  el.hidden = false;
+  el.innerHTML = `<div class="card">
+    <div class="ob-art"><span class="sticker pink s1 tilt-l">${s.tags[0]}</span><span class="sticker lime s2 tilt-r">${s.tags[1]}</span>
+      <div class="big">${s.icon}</div><span class="sticker s3">100% offline engine</span></div>
+    <h2>${s.title}</h2>
+    <p class="muted">${s.text}</p>
+    <div class="dots">${SLIDES.map((_, j) => `<i class="${j === i ? 'on' : ''}"></i>`).join('')}</div>
+    <div class="btn-row nowrap">
+      <button class="btn soft" data-ob="skip">Skip</button>
+      <button class="btn lime grow" data-ob="next">${i < SLIDES.length - 1 ? 'Next →' : 'Let\'s go 🚀'}</button>
+    </div></div>`;
+  el.onclick = (e) => {
+    const act = e.target.closest('[data-ob]')?.dataset.ob;
+    if (act === 'next' && i < SLIDES.length - 1) { showOnboarding(i + 1); return; }
+    if (act) { el.hidden = true; savePref('onboarded', true); }
+  };
+}
+
 // ---------- Pro ----------
+const proPrice = () => pro.price || PRO_PRICE_HINT;
+
 function renderPro() {
   $('#proBadge').hidden = !pro.active;
-  document.querySelectorAll('#radius option[data-pro]').forEach((o) => {
-    o.textContent = `${Number(o.value) / 1000} km${pro.active ? '' : ' (Pro)'}${o.value === '20000' ? ' — large, slower' : ''}`;
-  });
+  document.querySelectorAll('[data-pro-tag]').forEach((t) => { t.hidden = pro.active; });
   const card = $('#proCard');
   if (pro.active) {
-    card.innerHTML = '<h2>⭐ Nearby Pro</h2><p class="muted">Thank you for supporting the app! Unlimited areas and large radius are unlocked.</p>';
+    card.innerHTML = '<div class="card-head"><h2>Nearby Pro 🚀</h2><span class="sticker lime tilt-r">active ✓</span></div><p class="muted">Thank you for supporting the app 💛 Unlimited areas and big packs are unlocked.</p>';
     return;
   }
-  const buyLabel = pro.canBuyHere ? `Get Pro${pro.price ? ` · ${esc(pro.price)}` : ''}` : 'Get Pro in the Android app';
-  card.innerHTML = `<h2>⭐ Nearby Pro</h2>
-    <p class="muted">One-time purchase, no subscription.</p>
-    <ul class="tips"><li>Unlimited saved areas: whole trips, many cities</li><li>10 km and 20 km areas</li><li>Supports development of the app</li></ul>
-    ${pro.pending ? '<p class="small"><b>Payment pending.</b> Pro unlocks as soon as Google Play confirms it.</p>' : ''}
-    <div class="btn-row">
-      <button class="btn" data-pro="buy">${buyLabel}</button>
-      ${pro.canBuyHere ? '<button class="btn ghost" data-pro="restore">Restore purchase</button>' : ''}
-    </div>
-    <p class="muted small">Free: ${FREE_MAX_AREAS} areas, up to ${FREE_MAX_RADIUS / 1000} km. Payments are handled by Google Play.</p>`;
+  const buyLabel = pro.canBuyHere ? `Get Pro · ${esc(proPrice())} (one-time)` : 'Get Pro in the Android app';
+  card.innerHTML = `<div class="card-head"><h2>Nearby Pro 🚀</h2><span class="sticker lime tilt-r">lifetime pass</span></div>
+    <p class="muted">One-time ${esc(proPrice())}. No subscription, no login.</p>
+    <ul class="perks">
+      <li><span class="p-ico" style="background:var(--lime)">⚡</span><div><b>Unlimited saved packs</b><span>Free keeps ${FREE_MAX_AREAS}.</span></div></li>
+      <li><span class="p-ico" style="background:var(--blue-soft)">🗺️</span><div><b>10 & 20 km packs</b><span>Free goes up to ${FREE_MAX_RADIUS / 1000} km.</span></div></li>
+    </ul>
+    ${pro.pending ? '<p class="notice small">Payment pending. Pro unlocks as soon as Google Play confirms it.</p>' : ''}
+    <button class="btn lime big" data-pro="buy">${buyLabel}</button>
+    ${pro.canBuyHere ? '<button class="btn link" data-pro="restore">↺ Restore purchase</button>' : ''}`;
 }
 
 function showPro(reason) {
-  $('#proReason').textContent = reason;
-  $('#proDialogBuy').textContent = pro.canBuyHere ? `Get Pro${pro.price ? ` · ${pro.price}` : ''}` : 'Get Pro in the Android app';
+  $('#proReason').textContent = `⚠️ limit alert: ${reason}`;
+  $('#proDialogPrice').textContent = proPrice();
+  $('#proDialogBuy').textContent = pro.canBuyHere ? `Get Pro · ${proPrice()} (one-time) ⚡` : 'Get Pro in the Android app';
   $('#proDialog').showModal();
 }
 
@@ -972,7 +1168,7 @@ function bindEvents() {
   });
   $('#hideClosed').checked = state.hideClosed;
   $('#hideClosed').addEventListener('change', (e) => { state.hideClosed = e.target.checked; savePref('hideClosed', state.hideClosed); render(); });
-  document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+  document.querySelectorAll('.tabs [data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
 
   $('#list').addEventListener('click', async (e) => {
     const li = e.target.closest('.place');
@@ -1036,6 +1232,26 @@ function bindEvents() {
       e.target.value = String(FREE_MAX_RADIUS);
       showPro(`Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`);
     }
+    renderRadiusTiles();
+  });
+  $('#radiusTiles').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-radius]');
+    if (!t) return;
+    $('#radius').value = t.dataset.radius;
+    $('#radius').dispatchEvent(new Event('change'));
+  });
+  $('#banner').addEventListener('click', (e) => {
+    if (e.target.closest('#offlineDismiss')) { offlineCardDismissed = true; renderBanner(); }
+  });
+  $('#packCard').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-pack-sync]')?.dataset.packSync;
+    const r = id && state.regions.find((x) => x.id === id);
+    if (!r) return;
+    if (!navigator.onLine) { toast('Syncing needs internet'); return; }
+    $('#radius').value = String(r.radius);
+    renderRadiusTiles();
+    showView('areas');
+    downloadArea(r.lat, r.lon, r.name);
   });
   $('#hotelCard').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-act="ext"]');
@@ -1073,6 +1289,8 @@ function bindEvents() {
       updateRoute(true);
     }
     if (b.dataset.routeAct === 'close') closeRoute();
+    if (b.dataset.routeAct === 'nav') startNavigation(true);
+    if (b.dataset.routeAct === 'endnav') startNavigation(false);
     if (b.dataset.routeAct === 'ext') openExternal(b.dataset.url);
   });
   $('#map').addEventListener('click', (e) => {
@@ -1128,7 +1346,9 @@ window.addEventListener('error', (e) => { console.error(e.error || e.message); t
 window.addEventListener('unhandledrejection', (e) => { console.error(e.reason); toast('Something went wrong. Please try again.'); });
 
 async function main() {
-  $('#addCat').innerHTML = CATEGORIES.map((c) => `<option value="${c.id}">${c.icon} ${esc(c.label)}</option>`).join('');
+  $('#addCat').innerHTML = CATEGORIES.map((c) => `<label class="cat-opt"><input type="radio" name="cat" value="${c.id}" required><span>${c.icon} ${esc(c.label)}</span></label>`).join('');
+  renderRadiusTiles();
+  if (!loadPref('onboarded', false)) showOnboarding(0);
   $('#supportLink').href = SUPPORT_URL;
   updateNet();
   updateLocStatus(state.pos ? undefined : 'Finding your location…');

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0
+
+New look, from the Google Stitch design: a Gen-Z "zine sticker-book" style.
+- Warm paper background, thick ink outlines, hard offset shadows, buttons that press in,
+  sticker chips and badges; Space Grotesk + Plus Jakarta Sans fonts bundled for offline use.
+- Nearby: "no signal? no stress" hero, "found N spots" line, compass heading card,
+  sticker place cards with a Navigate button, big lime "Offline route" button, pack summary card,
+  "point phone toward…" ticker.
+- Map: name-label pins when zoomed in, ink-outlined blue route with white dashes, compact
+  route sheet with Walk/Drive times, step count, first-turn hint and Start navigation (map follows you).
+- Saved tab: radius tiles, download progress bar, "100% ready" pack cards, storage sticker.
+- New "drop a secret pin" sheet with category stickers, Pro sheet with price sticker, offline
+  card, empty state and a 3-step first-run onboarding. Night version for dark mode.
+
 ## 1.5.0
 
 - Offline map at every zoom level: saving an area now downloads its whole street map (zoom 0–14;

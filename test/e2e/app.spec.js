@@ -53,7 +53,9 @@ async function mockMap(context) {
   return seen;
 }
 
-test.beforeEach(async ({ context }) => {
+test.beforeEach(async ({ context }, testInfo) => {
+  // Skip the first-run onboarding, except in the test about it.
+  if (!testInfo.title.includes('onboarding')) await context.addInitScript(() => localStorage.setItem('onboarded', 'true'));
   // Never hit real servers in tests.
   await context.route(/\/api\/interpreter$/, (r) => r.fulfill({ json: { elements: decodeURIComponent(r.request().postData() || '').includes('"highway"') ? ROADS : ELEMENTS } }));
   await context.route(/routing\.openstreetmap\.de/, (r) => r.fulfill({ json: {
@@ -79,7 +81,7 @@ test.beforeEach(async ({ context }) => {
   await context.route(/^https:\/\/(www\.booking\.com|play\.google\.com)\//, (r) => r.fulfill({ contentType: 'text/html', body: '<h1>partner</h1>' }));
 });
 
-/** Count pixels of the route's blue (#4285f4) in a screenshot of the map. */
+/** Count pixels of the route's blue (#3d5afe) in a screenshot of the map. */
 async function routeBluePixels(page) {
   const png = (await page.locator('#map').screenshot()).toString('base64');
   return page.evaluate(async (b64) => {
@@ -92,14 +94,14 @@ async function routeBluePixels(page) {
     ctx.drawImage(img, 0, 0);
     const d = ctx.getImageData(0, 0, c.width, c.height).data;
     let n = 0;
-    for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 66) < 20 && Math.abs(d[i + 1] - 133) < 20 && Math.abs(d[i + 2] - 244) < 20) n++;
+    for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 61) < 20 && Math.abs(d[i + 1] - 90) < 20 && Math.abs(d[i + 2] - 254) < 20) n++;
     return n;
   }, png);
 }
 
 async function saveArea(page) {
   await page.goto('/');
-  await page.getByRole('button', { name: /Save area around me/ }).click();
+  await page.getByRole('button', { name: /Download my area now/i }).click();
   await expect(page.locator('#dlStatus')).toContainText('Saved 8 places, roads and the map');
   await page.getByRole('button', { name: 'Nearby' }).click();
 }
@@ -134,14 +136,14 @@ test('works fully offline after the first visit', async ({ page, context }) => {
 
   await context.setOffline(true);
   await page.reload();
-  await expect(page.locator('#netStatus')).toHaveText('Offline');
+  await expect(page.locator('#netStatus')).toContainText('offline');
   await expect(page.locator('.place .name').first()).toHaveText('Raju Pan Bhandar');
 
   // Adding a place works offline too.
   await page.getByRole('button', { name: 'Add a place' }).click();
   await page.locator('#addForm [name=name]').fill('Tea stall by the ghat');
-  await page.locator('#addCat').selectOption('tea');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.locator('#addCat input[value=tea]').check();
+  await page.getByRole('button', { name: /Save offline pin/i }).click();
   await expect(page.locator('.place', { hasText: 'Tea stall by the ghat' })).toContainText('added by you');
 
   await page.getByRole('button', { name: 'Map', exact: true }).click();
@@ -187,7 +189,7 @@ test('map shows places and keeps map data for offline use', async ({ page, conte
 
 test('export and import round-trip', async ({ page }) => {
   await saveArea(page);
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export' }).click()]);
   const file = await download.path();
 
@@ -202,7 +204,7 @@ test('export and import round-trip', async ({ page }) => {
 
 test('town search offers to save that town', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.locator('#placeQuery').fill('Varanasi');
   await page.getByRole('button', { name: 'Find' }).click();
   await expect(page.locator('#townResult')).not.toContainText('Looking for');
@@ -213,7 +215,7 @@ test('town search offers to save that town', async ({ page }) => {
 
 test('privacy policy is reachable', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.getByRole('link', { name: 'Privacy policy' }).click();
   await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
 });
@@ -242,7 +244,7 @@ test('offers an update when a new version is deployed', async ({ page }) => {
 test('hotels link to Booking.com with a commission notice', async ({ page, context }) => {
   await saveArea(page);
   await page.locator('.chip[data-cat=stay]').click();
-  await expect(page.locator('#hotelCard')).toContainText('Looking for a room in Godowlia?');
+  await expect(page.locator('#hotelCard')).toContainText('looking for a room in Godowlia?');
   await page.locator('.place-main', { hasText: 'Hotel Ganges View' }).click();
   const partner = page.locator('.place.open .partner');
   await expect(partner).toContainText('may earn a commission');
@@ -262,11 +264,11 @@ test('hotels link to Booking.com with a commission notice', async ({ page, conte
 
 test('free version limits areas and radius, Pro dialog explains', async ({ page, context }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await expect(page.locator('#proCard')).toContainText('Get Pro in the Android app');
 
   // Bigger radius needs Pro.
-  await page.locator('#radius').selectOption('10000');
+  await page.locator('#radiusTiles [data-radius="10000"]').click();
   await expect(page.locator('#proDialog')).toBeVisible();
   await expect(page.locator('#proReason')).toContainText('up to 5 km');
   await page.getByRole('button', { name: 'Not now' }).click();
@@ -315,8 +317,8 @@ test('Android app: buying Pro through Google Play unlocks it', async ({ page }) 
     };
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
-  const buy = page.locator('#proCard').getByRole('button', { name: 'Get Pro · ₹79.00' });
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  const buy = page.locator('#proCard').getByRole('button', { name: /Get Pro · ₹79\.00/ });
   await expect(buy).toBeVisible();
   await expect(page.locator('#proCard')).toContainText('Restore purchase');
   await buy.click();
@@ -326,7 +328,7 @@ test('Android app: buying Pro through Google Play unlocks it', async ({ page }) 
   expect(await page.evaluate(() => window.__acked)).toBe(true);
 
   // Big areas now allowed without the Pro dialog.
-  await page.locator('#radius').selectOption('20000');
+  await page.locator('#radiusTiles [data-radius="20000"]').click();
   await expect(page.locator('#proDialog')).toBeHidden();
   await expect(page.locator('#radius')).toHaveValue('20000');
 
@@ -351,8 +353,8 @@ test('Android app without a Play product explains instead of erroring', async ({
     };
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
-  await page.locator('#radius').selectOption('10000');
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.locator('#radiusTiles [data-radius="10000"]').click();
   await page.locator('#proDialogBuy').click();
   await expect(page.locator('#toast')).toContainText('installed from Google Play');
   await expect(page.locator('#toast')).not.toContainText('No product found');
@@ -363,7 +365,7 @@ test('typing "school" finds schools near me, not towns abroad', async ({ page })
   const townSearches = [];
   page.on('request', (r) => { if (r.url().includes('nominatim.openstreetmap.org/search')) townSearches.push(r.url()); });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.locator('#placeQuery').fill('School');
   await page.getByRole('button', { name: 'Find' }).click();
 
@@ -374,7 +376,7 @@ test('typing "school" finds schools near me, not towns abroad', async ({ page })
   expect(townSearches).toEqual([]); // never looked for towns called "School"
 
   // Second time: area already saved, goes straight to the list.
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.locator('#placeQuery').fill('ATM');
   await page.getByRole('button', { name: 'Find' }).click();
   await expect(page.locator('.chip[data-cat=atm]')).toHaveAttribute('aria-pressed', 'true');
@@ -385,7 +387,7 @@ test('town search stays in my country unless asked', async ({ page }) => {
   const searches = [];
   page.on('request', (r) => { if (r.url().includes('nominatim.openstreetmap.org/search')) searches.push(new URL(r.url())); });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.locator('#placeQuery').fill('Paris');
   await page.getByRole('button', { name: 'Find' }).click();
   await expect(page.locator('#townResult')).toContainText('No town called “Paris” found in India');
@@ -434,7 +436,7 @@ test('light, dark and system appearance', async ({ page }) => {
   await page.locator('#themeBtn').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   expect(await bg()).not.toBe(lightBg);
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#134e48');
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#14130f');
 
   // The street map itself stays light in dark mode.
   await page.getByRole('button', { name: 'Map', exact: true }).click();
@@ -447,7 +449,7 @@ test('light, dark and system appearance', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
   // Picker in Offline areas; "System" follows the phone.
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.getByRole('radio', { name: /System/ }).click();
   await expect(page.getByRole('radio', { name: /System/ })).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /./);
@@ -462,13 +464,13 @@ test('light, dark and system appearance', async ({ page }) => {
 
 test('route to a place: shortest path on saved roads, offline', async ({ page, context }) => {
   await saveArea(page);
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await expect(page.locator('#regions')).toContainText('routes ✓');
   await page.getByRole('button', { name: 'Nearby' }).click();
 
   await context.setOffline(true);
   await page.locator('.place-main', { hasText: 'Hotel Ganges View' }).click();
-  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await page.locator('.place.open').getByRole('button', { name: /route/i }).click();
 
   const panel = page.locator('#routePanel');
   await expect(page.locator('#view-map')).toBeVisible();
@@ -505,7 +507,7 @@ test('areas saved before roads existed get roads automatically', async ({ page }
   await page.goto('/');
   await addOldArea(page);
   await page.reload();
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await expect(page.locator('#regions')).toContainText('routes ✓', { timeout: 15000 });
   await expect(page.locator('#regions')).toContainText('map ✓', { timeout: 15000 });
   await expect(page.locator('#toast')).toContainText('now work offline');
@@ -516,7 +518,7 @@ test('route saves the roads it needs when online, then works offline', async ({ 
   await addOldArea(page);
   await page.reload();
   await page.locator('.place-main').first().click();
-  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await page.locator('.place.open').getByRole('button', { name: /route/i }).click();
   await expect(page.locator('#routePanel')).toContainText('Shortest route on saved roads · works offline');
   await expect(page.locator('#routePanel .route-sum')).toContainText('3.0 km');
 
@@ -524,7 +526,7 @@ test('route saves the roads it needs when online, then works offline', async ({ 
   await page.getByRole('button', { name: 'Close route' }).click();
   await context.setOffline(true);
   await page.getByRole('button', { name: 'Nearby' }).click();
-  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await page.locator('.place.open').getByRole('button', { name: /route/i }).click();
   await expect(page.locator('#routePanel')).toContainText('works offline');
   await expect.poll(() => routeBluePixels(page), { timeout: 10000 }).toBeGreaterThan(500);
 });
@@ -537,13 +539,13 @@ test('if roads cannot be downloaded: online routing service, then a straight lin
   await addOldArea(page);
   await page.reload();
   await page.locator('.place-main').first().click();
-  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await page.locator('.place.open').getByRole('button', { name: /route/i }).click();
   await expect(page.locator('#routePanel')).toContainText('Route from the online routing service');
   await expect(page.locator('#routePanel .route-sum')).toContainText('10 min');
 
   await page.getByRole('button', { name: 'Nearby' }).click();
   await context.setOffline(true);
-  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await page.locator('.place.open').getByRole('button', { name: /route/i }).click();
   await expect(page.locator('#routePanel')).toContainText('Open this route once while online');
 });
 
@@ -551,7 +553,7 @@ test('route button in a map marker popup', async ({ page }) => {
   await saveArea(page);
   await page.getByRole('button', { name: 'Map', exact: true }).click();
   await page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]').click();
-  await page.locator('.maplibregl-popup').getByRole('button', { name: /Route/ }).click();
+  await page.locator('.maplibregl-popup').getByRole('button', { name: /route/i }).click();
   await expect(page.locator('#routePanel')).toContainText('Raju Pan Bhandar');
   await expect(page.locator('#routePanel')).toContainText('works offline');
 });
@@ -566,7 +568,7 @@ test('a too-big road download is retried with a smaller area', async ({ page, co
     return radii.length <= 3 ? r.fulfill({ json: { elements: [], remark: 'runtime error: Query timed out' } }) : r.fulfill({ json: { elements: ROADS } });
   });
   await saveArea(page);
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await expect(page.locator('#regions')).toContainText('routes ✓');
   // 3 failed tries at 5 km (one per server), then 2.5 km works.
   expect(radii).toEqual([5000, 5000, 5000, 2500]);
@@ -574,7 +576,7 @@ test('a too-big road download is retried with a smaller area', async ({ page, co
 
 test('saving an area stores its map at every zoom level, so zooming works offline', async ({ page, context }) => {
   await saveArea(page);
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await expect(page.locator('#regions')).toContainText('map ✓');
   const zooms = await page.evaluate(async () => {
     const keys = (await (await caches.open('nearby-map-areas')).keys()).map((r) => r.url);
@@ -599,8 +601,49 @@ test('saving an area stores its map at every zoom level, so zooming works offlin
   expect(missing).toEqual([]);
 
   // Deleting the area removes its map files.
-  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
   page.once('dialog', (d) => d.accept());
   await page.locator('#regions [data-act=del]').click();
   await expect.poll(() => page.evaluate(async () => (await (await caches.open('nearby-map-areas')).keys()).length)).toBe(0);
+});
+
+test('first-run onboarding: 3 slides, then never again', async ({ page }) => {
+  await page.goto('/');
+  const ob = page.locator('#onboarding');
+  await expect(ob).toBeVisible();
+  await expect(ob).toContainText('works with zero signal');
+  await ob.getByRole('button', { name: /Next/ }).click();
+  await expect(ob).toContainText('find pan, chai, ATMs in seconds');
+  await ob.getByRole('button', { name: /Next/ }).click();
+  await expect(ob).toContainText('routes that work offline');
+  await ob.getByRole('button', { name: /go/ }).click();
+  await expect(ob).toBeHidden();
+  await page.reload();
+  await expect(ob).toBeHidden();
+});
+
+test('download shows a progress bar; route sheet can start navigation', async ({ page, context }) => {
+  // Slow the map download a little so the progress card is visible.
+  await context.route(/tiles\.openfreemap\.org\/planet\/.+\.pbf$/, async (r) => { await new Promise((res) => setTimeout(res, 30)); return r.fulfill({ status: 200, contentType: 'application/x-protobuf', body: Buffer.alloc(0) }); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Download my area now/i }).click();
+  await expect(page.locator('#dlProgress')).toBeVisible();
+  await expect(page.locator('#dlProgressLabel')).toContainText(/Saving/);
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places, roads and the map', { timeout: 30000 });
+  await expect(page.locator('#dlProgress')).toBeHidden();
+  await expect(page.locator('#regions')).toContainText('100% ready');
+
+  await page.getByRole('button', { name: 'Nearby', exact: true }).click();
+  await page.locator('.place-main', { hasText: 'Hotel Ganges View' }).click();
+  await page.locator('.place.open').getByRole('button', { name: /route/i }).click();
+  const panel = page.locator('#routePanel');
+  await expect(panel.getByRole('radio', { name: /Walk \(\d+ min\)/ })).toBeVisible();
+  await expect(panel.getByRole('radio', { name: /Drive \(\d+ min\)/ })).toBeVisible();
+  await expect(panel).toContainText('steps');
+  await expect(panel).toContainText(/Head [NESW]+/);
+  await panel.getByRole('button', { name: /Start offline navigation/i }).click();
+  await expect(panel).toHaveClass(/nav-mode/);
+  await expect(page.locator('#toast')).toContainText('navigation on');
+  await panel.getByRole('button', { name: /End navigation/i }).click();
+  await expect(panel).not.toHaveClass(/nav-mode/);
 });

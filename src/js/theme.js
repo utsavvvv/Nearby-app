@@ -1,6 +1,6 @@
 // Light / Dark / System appearance.
 const KEY = 'theme';
-const THEME_COLORS = { light: '#0f766e', dark: '#134e48' };
+const THEME_COLORS = { light: '#fff8ec', dark: '#14130f' };
 const media = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
 const listeners = new Set();
 

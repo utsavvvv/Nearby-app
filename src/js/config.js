@@ -54,3 +54,6 @@ export const ROUTING_TIMEOUT_MS = 15000;
 // Roads for offline routes are saved for up to this distance from an area's centre
 // (bigger areas would mean very large downloads).
 export const MAX_ROAD_RADIUS = 10000;
+// Price shown before Google Play reports the real one (and on the website). Keep it the same
+// as the price you set for `nearby_pro` in Play Console.
+export const PRO_PRICE_HINT = '₹79';
