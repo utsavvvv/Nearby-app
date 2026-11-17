@@ -8,9 +8,9 @@ import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache } from './m
 import { isNative, openExternal, saveTextFile } from './platform.js';
 import { hotelUrl, areaHotelsUrl } from './hotels.js';
 import { ProStore } from './pro.js';
-import { getTheme, setTheme, isDark, onThemeChange } from './theme.js';
+import { getTheme, setTheme, onThemeChange } from './theme.js';
 import {
-  DEFAULT_CENTER, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
+  DEFAULT_CENTER, DEFAULT_COUNTRY, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
 } from './config.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -110,6 +110,8 @@ function startGps() {
       // Only re-render if we moved noticeably, to keep scrolling smooth.
       if (!prev || prev.manual || distance(prev.lat, prev.lon, state.pos.lat, state.pos.lon) > 8) render();
       updateMeMarker();
+      // Keep the open map on the user as they walk, unless they've moved the map themselves.
+      if (map && state.view === 'map' && !map.userMoved) map.setView([state.pos.lat, state.pos.lon]);
     },
     (err) => {
       const why = err.code === 1 ? 'Location permission denied' : 'Waiting for GPS signal…';
@@ -327,7 +329,7 @@ function initMap() {
   const start = state.pos ? [state.pos.lat, state.pos.lon] : (state.regions[0] ? [state.regions[0].lat, state.regions[0].lon] : DEFAULT_CENTER);
   try {
     if (!webglSupported()) throw new Error('WebGL not available');
-    map = new PlaceMap($('#map'), { center: start, zoom: state.pos ? 16 : 13, dark: isDark() });
+    map = new PlaceMap($('#map'), { center: start, zoom: state.pos ? 16 : 13 });
     map.on('moveend', renderMarkers);
     map.on('error', (e) => console.warn('map:', e.error?.message || e));
     updateMeMarker();
@@ -370,7 +372,21 @@ function renderMarkers() {
   map.setMarkers(items);
 }
 
-function showView(view) {
+/** Show the map centred on the user (or on a given spot), following GPS until they pan. */
+function centreMap(target) {
+  if (!map) return;
+  map.resize();
+  if (target) {
+    map.setView(target.center, target.zoom);
+    map.userMoved = true; // looking at something specific: don't jump back to the user
+  } else if (state.pos) {
+    map.setView([state.pos.lat, state.pos.lon], Math.max(map.getZoom(), 15));
+    map.userMoved = false;
+  }
+  renderMarkers();
+}
+
+function showView(view, mapTarget) {
   state.view = view;
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
   document.querySelectorAll('.tabs button').forEach((b) => {
@@ -381,7 +397,8 @@ function showView(view) {
   $('#chips').hidden = view === 'areas';
   $('#addBtn').hidden = view === 'areas';
   if (view === 'map') {
-    if (initMap()) setTimeout(() => { map.resize(); renderMarkers(); }, 0);
+    // Wait one frame so the map's container has its real size before centring.
+    if (initMap()) requestAnimationFrame(() => centreMap(mapTarget));
   }
   if (view === 'areas') renderRegions();
 }
@@ -399,16 +416,16 @@ function setDownloading(on) {
 }
 
 async function downloadArea(lat, lon, label) {
-  if (state.download) { toast('A download is already running'); return; }
-  if (!navigator.onLine) { toast('You are offline. Connect to the internet to save an area.'); return; }
+  if (state.download) { toast('A download is already running'); return false; }
+  if (!navigator.onLine) { toast('You are offline. Connect to the internet to save an area.'); return false; }
   const radius = Number($('#radius').value);
   const id = `r:${lat.toFixed(3)},${lon.toFixed(3)},${radius}`;
   const limits = pro.limits();
-  if (radius > limits.maxRadius) { showPro(`Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`); return; }
+  if (radius > limits.maxRadius) { showPro(`Free version saves areas up to ${FREE_MAX_RADIUS / 1000} km.`); return false; }
   const isRefresh = state.regions.some((r) => r.id === id);
   if (!isRefresh && state.regions.length >= limits.maxAreas) {
     showPro(`Free version keeps ${FREE_MAX_AREAS} saved areas. Delete one, or get Pro for unlimited areas.`);
-    return;
+    return false;
   }
   const status = $('#dlStatus');
   const ctrl = new AbortController();
@@ -425,8 +442,10 @@ async function downloadArea(lat, lon, label) {
       ? `Saved ${places.length} places for offline use. ✅`
       : 'Saved, but no places were found here. Try a bigger radius, or add places yourself with ＋.';
     toast(places.length ? `Saved ${places.length} places — works offline now` : 'No places found in this area');
+    return true;
   } catch (err) {
     status.textContent = ctrl.signal.aborted ? 'Download cancelled.' : `Download failed: ${err.message}`;
+    return false;
   } finally {
     state.download = null;
     setDownloading(false);
@@ -459,54 +478,87 @@ async function searchTown(e) {
   const q = $('#placeQuery').value.trim();
   if (!q) return;
   const box = $('#townResult');
-  // "school", "atm", "chemist"... is a kind of place, not a town: say how to find those.
+  box.hidden = false;
+  // "school", "ATM", "chemist"... means "find these near me", not a town name.
   const cat = categoryForQuery(q);
-  const hint = cat
-    ? `<div class="town-hint">Looking for ${esc(CATEGORY_BY_ID[cat].label.toLowerCase())}? Save your area (⬇ Around me), then tap
-        <button class="btn small ghost" data-town-cat="${cat}">${CATEGORY_BY_ID[cat].icon} ${esc(CATEGORY_BY_ID[cat].label)}</button> on the Nearby tab.
-        This box is for town and city names.</div>`
-    : '';
-  if (!navigator.onLine) {
-    box.hidden = false;
-    box.innerHTML = hint || '<div class="town-hint">Town search needs internet.</div>';
+  if (cat) { await findCategoryNearMe(cat, box); return; }
+  if (!navigator.onLine) { box.innerHTML = '<p class="muted small">Town search needs internet.</p>'; return; }
+  await showTowns(q, box, false);
+}
+
+/** Show places of one category around the user, saving their area first if needed. */
+async function findCategoryNearMe(cat, box) {
+  const { label, icon } = CATEGORY_BY_ID[cat];
+  const open = () => { box.hidden = true; state.cat = cat; state.query = ''; $('#search').value = ''; showView('list'); render(); };
+  if (!state.pos) {
+    box.innerHTML = `<div class="town-hint">Turn on location to find ${esc(label.toLowerCase())} near you.</div>`;
     return;
   }
-  box.hidden = false;
-  box.innerHTML = `${hint}<p class="muted small">Searching…</p>`;
+  const covered = state.regions.some((r) => distance(r.lat, r.lon, state.pos.lat, state.pos.lon) <= r.radius * 0.8);
+  if (covered) { open(); toast(`${icon} ${label} near you`); return; }
+  if (!navigator.onLine) {
+    box.innerHTML = `<div class="town-hint">Your current spot isn't saved yet. Connect to the internet once to find ${esc(label.toLowerCase())} near you.</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="town-hint">Finding ${esc(label.toLowerCase())} near you…</div>`;
+  const ok = await downloadArea(state.pos.lat, state.pos.lon, await reverseLabel(state.pos.lat, state.pos.lon));
+  if (ok) { open(); toast(`${icon} ${label} near you`); } else box.hidden = true;
+}
+
+/** Find towns by name, in the user's country unless `worldwide`. */
+async function showTowns(q, box, worldwide) {
+  const cc = worldwide ? '' : await userCountry();
+  const countryName = cc ? countryLabel(cc) : '';
+  box.innerHTML = '<p class="muted small">Searching…</p>';
   try {
-    const hits = await findTowns(q);
+    const hits = await findTowns(q, cc);
     const rows = hits.map((h, i) => {
       const away = state.pos ? ` · ${formatDistance(distance(state.pos.lat, state.pos.lon, h.lat, h.lon))} away` : '';
       return `<li><span><b>${esc(h.name)}</b><span class="muted small"> ${esc(h.where)}${away}</span></span>
         <button class="btn small" data-town="${i}">⬇ Save</button></li>`;
     }).join('');
-    box.innerHTML = `${hint}${rows ? `<ul class="town-list">${rows}</ul>` : `<p class="muted small">No town called “${esc(q)}” found.</p>`}`;
+    const none = `<p class="muted small">No town called “${esc(q)}” found${countryName ? ` in ${esc(countryName)}` : ''}.</p>`;
+    const wider = cc ? `<button class="btn small ghost" data-worldwide>Search outside ${esc(countryName)}</button>` : '';
+    box.innerHTML = `${rows ? `<ul class="town-list">${rows}</ul>` : none}${wider}`;
     box.onclick = (ev) => {
       const t = ev.target.closest('[data-town]');
-      if (t) {
-        const h = hits[Number(t.dataset.town)];
-        if (map) map.setView([h.lat, h.lon], 14);
-        downloadArea(h.lat, h.lon, h.name);
-      }
-      const c = ev.target.closest('[data-town-cat]');
-      if (c) { state.cat = c.dataset.townCat; showView('list'); render(); }
+      if (t) { const h = hits[Number(t.dataset.town)]; downloadArea(h.lat, h.lon, h.name); }
+      if (ev.target.closest('[data-worldwide]')) showTowns(q, box, true);
     };
   } catch {
-    box.innerHTML = `${hint}<p class="muted small">Search failed. Check your connection.</p>`;
+    box.innerHTML = '<p class="muted small">Search failed. Check your connection.</p>';
   }
 }
 
+function countryLabel(cc) {
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(cc.toUpperCase()) || cc.toUpperCase(); } catch { return cc.toUpperCase(); }
+}
+
+/** The user's country code (e.g. "in"), looked up once from their location and remembered. */
+async function userCountry() {
+  const saved = loadPref('country', null);
+  if (saved?.cc && (!state.pos || distance(saved.lat, saved.lon, state.pos.lat, state.pos.lon) < 200000)) return saved.cc;
+  if (state.pos && navigator.onLine) {
+    try {
+      const j = await fetchJson(`${NOMINATIM_URL}/reverse?format=jsonv2&zoom=3&lat=${state.pos.lat}&lon=${state.pos.lon}`);
+      const cc = j.address?.country_code;
+      if (cc) { savePref('country', { cc, lat: state.pos.lat, lon: state.pos.lon }); return cc; }
+    } catch { /* fall through */ }
+  }
+  return saved?.cc || DEFAULT_COUNTRY;
+}
+
 /** Towns and cities matching a name, nearest to the user first. */
-async function findTowns(q) {
+async function findTowns(q, cc) {
   const params = new URLSearchParams({ format: 'jsonv2', limit: '8', q, featureType: 'settlement' });
+  if (cc) params.set('countrycodes', cc);
   if (state.pos) {
-    // Prefer results around the user (not a hard limit, so far-away towns still work).
     const { lat, lon } = state.pos;
     params.set('viewbox', [lon - 5, lat + 5, lon + 5, lat - 5].map((n) => n.toFixed(4)).join(','));
   }
   let hits = await fetchJson(`${NOMINATIM_URL}/search?${params}`);
   if (!hits.length) {
-    // Not a town: try landmarks too (e.g. "Kedarnath Temple").
+    // Not a town: try landmarks too (e.g. "Kedarnath Temple"), still in the same country.
     params.delete('featureType');
     hits = await fetchJson(`${NOMINATIM_URL}/search?${params}`);
   }
@@ -721,8 +773,7 @@ function bindEvents() {
     const act = actEl?.dataset.act;
     if (act === 'map') {
       const p = state.places.find((x) => x.id === id);
-      showView('map');
-      map?.setView([p.lat, p.lon], 18);
+      showView('map', { center: [p.lat, p.lon], zoom: 18 });
       return;
     }
     if (act === 'ext') { openExternal(actEl.dataset.url); return; }
@@ -758,11 +809,10 @@ function bindEvents() {
     setTheme(next);
     toast(`Appearance: ${THEME_LABEL[next]}`);
   });
-  onThemeChange(({ theme, dark }) => {
+  onThemeChange(({ theme }) => {
     document.querySelectorAll('[data-theme-choice]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === theme)));
     $('#themeBtn').setAttribute('aria-label', `Appearance: ${THEME_LABEL[theme]}`);
     $('#themeBtn').textContent = theme === 'system' ? '🌓' : theme === 'light' ? '☀️' : '🌙';
-    map?.setDark(dark);
   });
 
   $('#proCard').addEventListener('click', (e) => {
@@ -802,7 +852,7 @@ function bindEvents() {
   });
 
   $('#recenterBtn').addEventListener('click', () => {
-    if (state.pos) map?.setView([state.pos.lat, state.pos.lon], 16);
+    if (state.pos) { map?.setView([state.pos.lat, state.pos.lon], 16); if (map) map.userMoved = false; }
     else toast('No location yet');
   });
   $('#setHereBtn').addEventListener('click', () => {

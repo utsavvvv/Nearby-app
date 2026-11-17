@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+- Typing a kind of place ("school", "ATM", "chemist") in the search box now finds those
+  near you (saving your area first if needed) instead of towns with that name abroad.
+- Town search stays in your own country, with a "Search outside India" button if you need it.
+- The Map tab always opens on your current location and follows you until you move the map.
+- The street map stays light in dark mode.
+
 ## 1.3.0
 
 - Appearance: System (follows the phone), Light or Dark. Switch with the 🌓 button in the

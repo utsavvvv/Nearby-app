@@ -12,6 +12,7 @@ const ELEMENTS = [
   { type: 'node', id: 6, lat: 25.3190, lon: 82.9745, tags: { amenity: 'cafe', name: 'Chai Point' } },
   { type: 'node', id: 7, lat: 25.3190, lon: 82.9745, tags: { amenity: 'bench' } },
   { type: 'node', id: 8, lat: 25.3300, lon: 82.9900, tags: { tourism: 'hotel', name: 'Hotel Ganges View' } },
+  { type: 'node', id: 9, lat: 25.3220, lon: 82.9760, tags: { amenity: 'school', name: 'Central Hindu School' } },
 ];
 
 test.use({ geolocation: HOME, permissions: ['geolocation'] });
@@ -43,9 +44,13 @@ async function mockMap(context) {
 test.beforeEach(async ({ context }) => {
   // Never hit real servers in tests.
   await context.route(/\/api\/interpreter$/, (r) => r.fulfill({ json: { elements: ELEMENTS } }));
-  await context.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: { address: { suburb: 'Godowlia' } } }));
+  await context.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: { address: { suburb: 'Godowlia', country_code: 'in' } } }));
   await context.route(/nominatim\.openstreetmap\.org\/search/, (r) => {
-    const q = new URL(r.request().url()).searchParams.get('q').toLowerCase();
+    const params = new URL(r.request().url()).searchParams;
+    const q = params.get('q').toLowerCase();
+    if (q === 'paris') {
+      return r.fulfill({ json: params.get('countrycodes') ? [] : [{ lat: '48.8566', lon: '2.3522', name: 'Paris', display_name: 'Paris, Île-de-France, France' }] });
+    }
     if (q === 'school') {
       // Like the real service: a far-away place literally named "School", and one nearby.
       return r.fulfill({ json: [
@@ -62,14 +67,14 @@ test.beforeEach(async ({ context }) => {
 async function saveArea(page) {
   await page.goto('/');
   await page.getByRole('button', { name: /Save area around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places');
   await page.getByRole('button', { name: 'Nearby' }).click();
 }
 
 test('saves an area and lists places nearest first', async ({ page }) => {
   await saveArea(page);
   const names = page.locator('.place .name');
-  await expect(names).toHaveCount(7);
+  await expect(names).toHaveCount(8);
   await expect(names.first()).toHaveText('Raju Pan Bhandar');
   await expect(page.locator('.place').first()).toContainText('Open now');
   await expect(page.locator('.place', { hasText: 'Gupta' })).toContainText('Closed');
@@ -154,7 +159,7 @@ test('export and import round-trip', async ({ page }) => {
   await expect(page.locator('#regions')).toContainText('No areas saved yet');
 
   await page.locator('#importInput').setInputFiles(file);
-  await expect(page.locator('#toast')).toContainText('Imported 1 areas and 7 places');
+  await expect(page.locator('#toast')).toContainText('Imported 1 areas and 8 places');
   await expect(page.locator('#regions')).toContainText('Godowlia');
 });
 
@@ -165,7 +170,7 @@ test('town search offers to save that town', async ({ page }) => {
   await page.getByRole('button', { name: 'Find' }).click();
   await expect(page.locator('#townResult')).not.toContainText('Looking for');
   await page.locator('.town-list').getByRole('button', { name: /Save/ }).first().click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places');
   await expect(page.locator('#regions')).toContainText('Varanasi');
 });
 
@@ -232,7 +237,7 @@ test('free version limits areas and radius, Pro dialog explains', async ({ page,
 
   // Two areas are free; the third asks for Pro.
   await page.getByRole('button', { name: /Around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 7 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places');
   await context.setGeolocation({ latitude: 25.4, longitude: 82.9 });
   await page.waitForTimeout(300);
   await page.getByRole('button', { name: /Around me/ }).click();
@@ -317,29 +322,65 @@ test('Android app without a Play product explains instead of erroring', async ({
   expect(await page.evaluate(() => window.__bought)).toBeUndefined();
 });
 
-test('typing "school" explains categories and lists nearest towns first', async ({ page }) => {
-  const requests = [];
-  page.on('request', (r) => { if (r.url().includes('nominatim.openstreetmap.org/search')) requests.push(new URL(r.url())); });
+test('typing "school" finds schools near me, not towns abroad', async ({ page }) => {
+  const townSearches = [];
+  page.on('request', (r) => { if (r.url().includes('nominatim.openstreetmap.org/search')) townSearches.push(r.url()); });
   await page.goto('/');
   await page.getByRole('button', { name: 'Offline areas' }).click();
   await page.locator('#placeQuery').fill('School');
   await page.getByRole('button', { name: 'Find' }).click();
 
-  const hint = page.locator('.town-hint');
-  await expect(hint).toContainText('Looking for schools & colleges?');
-  await expect(page.locator('.town-list li')).toHaveCount(2);
-  await expect(page.locator('.town-list li').first()).toContainText('Ghazipur'); // nearest first
-  await expect(page.locator('.town-list li').last()).toContainText('South Korea');
-  await expect(page.locator('.town-list li').last()).toContainText('km away');
-
-  // Search asks for towns, biased to where the user is.
-  expect(requests[0].searchParams.get('featureType')).toBe('settlement');
-  expect(requests[0].searchParams.get('viewbox')).toBeTruthy();
-
-  // The hint button jumps to the category on the Nearby tab.
-  await hint.getByRole('button', { name: /Schools & Colleges/ }).click();
+  // It saves the area around the user and opens the Schools category.
   await expect(page.locator('#view-list')).toBeVisible();
   await expect(page.locator('.chip[data-cat=education]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.place .name')).toHaveText(['Central Hindu School']);
+  expect(townSearches).toEqual([]); // never looked for towns called "School"
+
+  // Second time: area already saved, goes straight to the list.
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.locator('#placeQuery').fill('ATM');
+  await page.getByRole('button', { name: 'Find' }).click();
+  await expect(page.locator('.chip[data-cat=atm]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.place .name')).toHaveText(['SBI ATM']);
+});
+
+test('town search stays in my country unless asked', async ({ page }) => {
+  const searches = [];
+  page.on('request', (r) => { if (r.url().includes('nominatim.openstreetmap.org/search')) searches.push(new URL(r.url())); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await page.locator('#placeQuery').fill('Paris');
+  await page.getByRole('button', { name: 'Find' }).click();
+  await expect(page.locator('#townResult')).toContainText('No town called “Paris” found in India');
+  expect(searches[0].searchParams.get('countrycodes')).toBe('in');
+
+  await page.getByRole('button', { name: 'Search outside India' }).click();
+  await expect(page.locator('.town-list li')).toContainText('France');
+});
+
+test('map opens on my current location', async ({ page, context }) => {
+  const meIsCentred = () => page.evaluate(() => {
+    const m = document.querySelector('#map').getBoundingClientRect();
+    const d = document.querySelector('.me-dot')?.getBoundingClientRect();
+    if (!d || !d.width) return false;
+    return Math.abs(d.x + d.width / 2 - (m.x + m.width / 2)) < 20 && Math.abs(d.y + d.height / 2 - (m.y + m.height / 2)) < 20;
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Map' }).click();
+  await expect.poll(meIsCentred).toBe(true);
+
+  // Move somewhere else while on another tab; opening the map again centres on the new spot.
+  await page.getByRole('button', { name: 'Nearby' }).click();
+  await context.setGeolocation({ latitude: 25.36, longitude: 83.02 });
+  await expect(page.locator('#locStatus')).toContainText('25.3600');
+  await page.getByRole('button', { name: 'Map' }).click();
+  await expect.poll(meIsCentred).toBe(true);
+
+  // "Show on map" for a place centres on that place instead.
+  await saveArea(page);
+  await page.locator('.place-main').first().click();
+  await page.locator('.place.open [data-act=map]').click();
+  await expect.poll(meIsCentred).toBe(false);
 });
 
 test('light, dark and system appearance', async ({ page }) => {
@@ -358,10 +399,11 @@ test('light, dark and system appearance', async ({ page }) => {
   expect(await bg()).not.toBe(lightBg);
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#134e48');
 
-  // The map uses the dark street style.
+  // The street map itself stays light in dark mode.
   await page.getByRole('button', { name: 'Map' }).click();
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
-  await expect.poll(() => styles.includes('dark')).toBe(true);
+  await expect.poll(() => styles.includes('liberty')).toBe(true);
+  expect(styles).not.toContain('dark');
 
   // The choice is remembered, with no flash of light colours on reload.
   await page.reload();

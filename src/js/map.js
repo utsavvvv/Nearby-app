@@ -3,7 +3,7 @@
 // so areas you have looked at while online still show offline. Works the same in the
 // browser and inside the Android app.
 import * as maplibregl from '../vendor/maplibre/maplibre-gl.mjs';
-import { MAP_STYLE_URL, MAP_STYLE_DARK_URL, MAP_HOST, MAX_CACHED_MAP_FILES } from './config.js';
+import { MAP_STYLE_URL, MAP_HOST, MAX_CACHED_MAP_FILES } from './config.js';
 
 export const MAP_CACHE = 'nearby-map';
 const PROTOCOL = 'nearbycache';
@@ -88,7 +88,7 @@ function circle(lon, lat, radius, steps = 48) {
 }
 
 export class PlaceMap {
-  constructor(container, { center, zoom, dark = false }) {
+  constructor(container, { center, zoom }) {
     addCachingProtocol();
     this.markers = [];
     this.me = null;
@@ -107,7 +107,11 @@ export class PlaceMap {
     });
     this.map.touchZoomRotate.disableRotation();
     this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
-    this.dark = false;
+    this.userMoved = false;
+    // Remember when the person pans/zooms themselves, so GPS updates don't yank the map away.
+    const mark = (e) => { if (e.originalEvent) this.userMoved = true; };
+    this.map.on('dragstart', mark);
+    this.map.on('zoomstart', mark);
     // Changing style removes our own layers, so (re-)add them every time a style loads.
     this.map.on('style.load', () => {
       if (!this.map.getSource('accuracy')) {
@@ -116,25 +120,12 @@ export class PlaceMap {
       }
       if (this.accuracy) this.setAccuracy(...this.accuracy);
     });
-    if (dark) this.setDark(true);
-  }
-
-  /** Switch between the light and dark street map. */
-  async setDark(dark) {
-    if (dark === this.dark) return;
-    this.dark = dark;
-    let url = MAP_STYLE_URL;
-    // Fall back to the light map if the dark one can't load (e.g. offline and never saved).
-    if (dark) {
-      try { await load(MAP_STYLE_DARK_URL); url = MAP_STYLE_DARK_URL; } catch { /* keep the light map */ }
-    }
-    if (this.dark !== dark) return; // changed again meanwhile
-    this.map.setStyle(url.replace('https://', `${PROTOCOL}://`));
   }
 
   on(event, fn) { this.map.on(event, fn); }
   resize() { this.map.resize(); }
   getCenter() { const c = this.map.getCenter(); return { lat: c.lat, lon: c.lng }; }
+  getZoom() { return this.map.getZoom(); }
   setView([lat, lon], zoom) { this.map.jumpTo({ center: [lon, lat], zoom: zoom ?? this.map.getZoom() }); }
   contains(lat, lon) {
     const b = this.map.getBounds();
