@@ -46,3 +46,11 @@ export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=app
 // What the free version allows. Pro removes these limits.
 export const FREE_MAX_AREAS = 2;
 export const FREE_MAX_RADIUS = 5000;
+
+// Road routes (the blue line). Free OpenStreetMap routing servers run by FOSSGIS: fine for
+// light use, no key. For heavy traffic switch to a paid OSRM-compatible service here.
+export const ROUTING_URL = 'https://routing.openstreetmap.de';
+export const ROUTING_TIMEOUT_MS = 15000;
+// Roads for offline routes are saved for up to this distance from an area's centre
+// (bigger areas would mean very large downloads).
+export const MAX_ROAD_RADIUS = 10000;

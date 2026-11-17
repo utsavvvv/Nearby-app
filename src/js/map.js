@@ -113,12 +113,25 @@ export class PlaceMap {
     this.map.on('dragstart', mark);
     this.map.on('zoomstart', mark);
     // Changing style removes our own layers, so (re-)add them every time a style loads.
+    this.route = null;
     this.map.on('style.load', () => {
       if (!this.map.getSource('accuracy')) {
         this.map.addSource('accuracy', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
         this.map.addLayer({ id: 'accuracy', type: 'fill', source: 'accuracy', paint: { 'fill-color': '#1a73e8', 'fill-opacity': 0.12 } });
       }
+      if (!this.map.getSource('route')) {
+        const empty = { type: 'FeatureCollection', features: [] };
+        this.map.addSource('route', { type: 'geojson', data: empty });
+        // Google-Maps-like route: dark blue casing under a bright blue line; dashed when it's only a straight line.
+        this.map.addLayer({ id: 'route-casing', type: 'line', source: 'route', filter: ['!=', ['get', 'straight'], true],
+          layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#1558b0', 'line-width': 9 } });
+        this.map.addLayer({ id: 'route-line', type: 'line', source: 'route', filter: ['!=', ['get', 'straight'], true],
+          layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#4285f4', 'line-width': 6 } });
+        this.map.addLayer({ id: 'route-straight', type: 'line', source: 'route', filter: ['==', ['get', 'straight'], true],
+          layout: { 'line-cap': 'round' }, paint: { 'line-color': '#4285f4', 'line-width': 4, 'line-dasharray': [1, 2] } });
+      }
       if (this.accuracy) this.setAccuracy(...this.accuracy);
+      if (this.route) this.setRoute(this.route);
     });
   }
 
@@ -161,9 +174,27 @@ export class PlaceMap {
     this.setAccuracy(lat, lon, accuracyMeters);
   }
 
+  /** Draw a route: { coords: [[lon, lat], ...], straight: boolean }, or null to clear. */
+  setRoute(route) {
+    this.route = route;
+    const src = this.map.getSource('route'); // undefined until the style loads; style.load re-applies it
+    if (!src) return;
+    src.setData(route
+      ? { type: 'Feature', properties: { straight: Boolean(route.straight) }, geometry: { type: 'LineString', coordinates: route.coords } }
+      : { type: 'FeatureCollection', features: [] });
+  }
+
+  /** Zoom so all the given [lon, lat] points are visible. */
+  fitPoints(coords, bottomPadding = 40) {
+    if (!coords.length) return;
+    let [w, s] = coords[0]; let [e, n] = coords[0];
+    for (const [x, y] of coords) { w = Math.min(w, x); e = Math.max(e, x); s = Math.min(s, y); n = Math.max(n, y); }
+    this.map.fitBounds([[w, s], [e, n]], { padding: { top: 70, left: 40, right: 40, bottom: bottomPadding }, maxZoom: 17, duration: 0 });
+  }
+
   setAccuracy(lat, lon, radius) {
     this.accuracy = [lat, lon, radius];
-    const src = this.map.isStyleLoaded?.() !== false ? this.map.getSource?.('accuracy') : null;
+    const src = this.map.getSource('accuracy'); // undefined until the style loads; style.load re-applies it
     if (!src) return;
     src.setData(radius > 0 ? circle(lon, lat, radius) : { type: 'FeatureCollection', features: [] });
   }

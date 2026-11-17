@@ -3,6 +3,7 @@
 
 import { buildOverpassQuery, classify } from './categories.js';
 import { OVERPASS_ENDPOINTS, OVERPASS_TIMEOUT_MS } from './config.js';
+import { ROAD_TYPES } from './graph.js';
 
 export class DownloadError extends Error {}
 
@@ -24,7 +25,23 @@ async function fetchWithTimeout(url, options, ms, signal) {
  * Tries each Overpass server in turn. Pass an AbortSignal to cancel.
  */
 export async function fetchPlaces(lat, lon, radiusMeters, regionId, { signal, endpoints = OVERPASS_ENDPOINTS, timeoutMs = OVERPASS_TIMEOUT_MS } = {}) {
-  const query = buildOverpassQuery(lat, lon, radiusMeters);
+  const json = await overpass(buildOverpassQuery(lat, lon, radiusMeters), { signal, endpoints, timeoutMs });
+  return toPlaces(json.elements || [], regionId);
+}
+
+/** Roads around a point (ways + their nodes), for offline routing. */
+export async function fetchRoads(lat, lon, radiusMeters, { signal, endpoints = OVERPASS_ENDPOINTS, timeoutMs = OVERPASS_TIMEOUT_MS } = {}) {
+  const around = `(around:${Math.round(radiusMeters)},${lat.toFixed(6)},${lon.toFixed(6)})`;
+  const query = `[out:json][timeout:120];
+way["highway"~"^(${ROAD_TYPES.join('|')})$"]${around}->.w;
+.w out body qt;
+node(w.w);
+out skel qt;`;
+  const json = await overpass(query, { signal, endpoints, timeoutMs });
+  return json.elements || [];
+}
+
+async function overpass(query, { signal, endpoints, timeoutMs }) {
   let lastError;
   for (const url of endpoints) {
     if (signal?.aborted) throw signal.reason ?? new DownloadError('Cancelled');
@@ -41,7 +58,7 @@ export async function fetchPlaces(lat, lon, radiusMeters, regionId, { signal, en
       if (json.remark && /error|timed out/i.test(json.remark) && !(json.elements || []).length) {
         throw new DownloadError('The map data server could not finish — try a smaller radius');
       }
-      return toPlaces(json.elements || [], regionId);
+      return json;
     } catch (err) {
       if (signal?.aborted) throw err;
       lastError = err;

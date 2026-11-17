@@ -40,7 +40,7 @@ const csp = [
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
-  `connect-src 'self' ${[...new Set([...config.OVERPASS_ENDPOINTS.map(origin), origin(config.NOMINATIM_URL), mapOrigin])].join(' ')}`,
+  `connect-src 'self' ${[...new Set([...config.OVERPASS_ENDPOINTS.map(origin), origin(config.NOMINATIM_URL), mapOrigin, origin(config.ROUTING_URL)])].join(' ')}`,
   "worker-src 'self'",
   "manifest-src 'self'",
   "object-src 'none'",

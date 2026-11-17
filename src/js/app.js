@@ -1,7 +1,9 @@
 import { CATEGORIES, CATEGORY_BY_ID, categoryForQuery } from './categories.js';
 import { distance, bearing, compassPoint, formatDistance, walkTime } from './geo.js';
 import * as db from './db.js';
-import { fetchPlaces } from './overpass.js';
+import { fetchPlaces, fetchRoads } from './overpass.js';
+import { buildGraph, shortestPath } from './graph.js';
+import { fetchRoute, straightLine, formatDuration, SPEED } from './routing.js';
 import { isOpenAt } from './hours.js';
 import { sanitizePlace, sanitizeRegion } from './model.js';
 import { PlaceMap, webglSupported, cachedMapFileCount, clearMapCache } from './map.js';
@@ -10,7 +12,7 @@ import { hotelUrl, areaHotelsUrl } from './hotels.js';
 import { ProStore } from './pro.js';
 import { getTheme, setTheme, onThemeChange } from './theme.js';
 import {
-  DEFAULT_CENTER, DEFAULT_COUNTRY, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
+  DEFAULT_CENTER, DEFAULT_COUNTRY, MAX_ROAD_RADIUS, FREE_MAX_AREAS, FREE_MAX_RADIUS, PLAY_STORE_URL, NOMINATIM_TIMEOUT_MS, NOMINATIM_URL, STALE_AFTER_DAYS, SUPPORT_URL,
 } from './config.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -29,6 +31,7 @@ const state = {
   view: 'list',
   openId: null,
   download: null, // AbortController of a running download
+  route: null, // { place, mode: 'walk'|'drive', result, source, from }
 };
 
 const pro = new ProStore({
@@ -112,6 +115,12 @@ function startGps() {
       updateMeMarker();
       // Keep the open map on the user as they walk, unless they've moved the map themselves.
       if (map && state.view === 'map' && !map.userMoved) map.setView([state.pos.lat, state.pos.lon]);
+      // Re-plan the route as the user walks (online routes less often, to spare the server).
+      const r = state.route;
+      if (r?.from) {
+        const moved = distance(r.from.lat, r.from.lon, state.pos.lat, state.pos.lon);
+        if (moved > (r.source === 'online' ? 150 : 25)) updateRoute(false);
+      }
     },
     (err) => {
       const why = err.code === 1 ? 'Location permission denied' : 'Waiting for GPS signal…';
@@ -221,7 +230,6 @@ const ARROW_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="
 function placeItem(p) {
   const cat = CATEGORY_BY_ID[p.cat];
   const hasPos = p.d != null;
-  const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}&travelmode=walking`;
   const geoUrl = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}(${encodeURIComponent(displayName(p))})`;
   const kind = p.kind && !cat.label.toLowerCase().includes(p.kind) ? p.kind : '';
   const openBadge = p.open === true ? '<span class="badge open">Open now</span>' : p.open === false ? '<span class="badge closed">Closed</span>' : '';
@@ -245,9 +253,9 @@ function placeItem(p) {
       ${hasPos ? `<p>🚶 ${walkTime(p.d)} · head ${compassPoint(p.b)} (${Math.round(p.b)}°)</p>` : ''}
       <p class="muted small">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</p>
       <div class="btn-row">
-        <button class="btn small" data-act="map">🗺️ Show on map</button>
+        <button class="btn small" data-act="route">🧭 Route</button>
+        <button class="btn small ghost" data-act="map">🗺️ Show on map</button>
         <button class="btn small ghost" data-act="ext" data-url="${esc(geoUrl)}">📲 Open in maps app</button>
-        <button class="btn small ghost" data-act="ext" data-url="${esc(navUrl)}">↗ Directions (online)</button>
         ${p.source === 'user' ? '<button class="btn small danger" data-act="delete">Delete</button>' : ''}
       </div>
       ${p.cat === 'stay' && navigator.onLine ? `<div class="partner">
@@ -366,17 +374,110 @@ function renderMarkers() {
       const open = p.open === true ? '<br><span class="badge open">Open now</span>' : p.open === false ? '<br><span class="badge closed">Closed</span>' : '';
       return {
         lat: p.lat, lon: p.lon, color: cat.color, icon: cat.icon, title: displayName(p),
-        popupHtml: `<b>${esc(displayName(p))}</b><br>${esc(cat.label)}${open}${p.hours ? `<br>🕒 ${esc(p.hours)}` : ''}${p.note ? `<br>📝 ${esc(p.note)}` : ''}${dist}`,
+        popupHtml: `<b>${esc(displayName(p))}</b><br>${esc(cat.label)}${open}${p.hours ? `<br>🕒 ${esc(p.hours)}` : ''}${p.note ? `<br>📝 ${esc(p.note)}` : ''}${dist}<br><button class="btn small popup-route" data-route="${esc(p.id)}">🧭 Route</button>`,
       };
     });
   map.setMarkers(items);
+}
+
+// ---------- routes ----------
+let graphCache = null; // { id, g }
+
+/** The saved road graph that covers both points, if any (loaded from storage once). */
+async function graphFor(a, b) {
+  const inside = (r, p) => distance(r.lat, r.lon, p.lat, p.lon) <= (r.roadRadius || 0);
+  const region = state.regions
+    .filter((r) => r.roads && inside(r, a) && inside(r, b))
+    .sort((x, y) => x.roadRadius - y.roadRadius)[0];
+  if (!region) return null;
+  if (graphCache?.id === region.id) return graphCache.g;
+  const g = await db.getOne('graphs', region.id).catch(() => null);
+  if (g) graphCache = { id: region.id, g };
+  return g;
+}
+
+function routePanelSpace() {
+  const el = $('#routePanel');
+  return el && !el.hidden ? el.offsetHeight + 24 : 40;
+}
+
+function startRoute(place) {
+  if (!place) return;
+  state.route = { place, mode: state.route?.mode || 'walk' };
+  showView('map', { route: true });
+  updateRoute(true);
+}
+
+function closeRoute() {
+  state.route = null;
+  map?.setRoute(null);
+  $('#routePanel').hidden = true;
+}
+
+async function updateRoute(fit) {
+  const r = state.route;
+  if (!r || !initMap()) return;
+  if (!state.pos) { renderRoutePanel('Turn on location (GPS) to get a route.'); return; }
+  const from = { lat: state.pos.lat, lon: state.pos.lon };
+  const to = { lat: r.place.lat, lon: r.place.lon };
+  if (!r.result) renderRoutePanel('Finding the shortest route…');
+  let result = null; let source = 'straight';
+  const g = await graphFor(from, to);
+  if (g) {
+    const sp = shortestPath(g, from, to, r.mode);
+    if (sp) { result = { ...sp, duration: sp.distance / SPEED[r.mode], straight: false }; source = 'offline'; }
+  }
+  if (!result && navigator.onLine) {
+    try { result = await fetchRoute(from, to, r.mode); source = 'online'; } catch { /* fall back below */ }
+  }
+  if (!result) result = straightLine(from, to, r.mode);
+  if (state.route !== r) return; // the user picked another place meanwhile
+  Object.assign(r, { result, source, from, hadRoads: Boolean(g) });
+  map.setRoute(result);
+  renderRoutePanel();
+  if (fit) { map.fitPoints(result.coords, routePanelSpace()); map.userMoved = true; }
+}
+
+function renderRoutePanel(message) {
+  const r = state.route;
+  const panel = $('#routePanel');
+  if (!r) { panel.hidden = true; return; }
+  const cat = CATEGORY_BY_ID[r.place.cat];
+  const res = r.result;
+  const notes = {
+    offline: 'Shortest route on saved roads · works offline',
+    online: 'Route from the online routing service',
+    straight: r.hadRoads
+      ? 'No road connection found, so this is a straight line.'
+      : navigator.onLine
+        ? 'Couldn\'t get a road route, so this is a straight line.'
+        : 'Straight line: roads for this spot aren\'t saved. Save this area again (↻) while online for offline routes.',
+  };
+  const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${r.place.lat},${r.place.lon}&travelmode=${r.mode === 'drive' ? 'driving' : 'walking'}`;
+  panel.hidden = false;
+  panel.innerHTML = `<div class="route-head">
+      <span class="route-dest">${cat.icon} <b>${esc(displayName(r.place))}</b></span>
+      <button class="icon-btn route-close" data-route-act="close" aria-label="Close route">✕</button>
+    </div>
+    <div class="segmented route-modes" role="radiogroup" aria-label="Travel mode">
+      <button role="radio" data-route-mode="walk" aria-checked="${r.mode === 'walk'}">🚶 Walk</button>
+      <button role="radio" data-route-mode="drive" aria-checked="${r.mode === 'drive'}">🚗 Drive</button>
+    </div>
+    ${message ? `<p class="muted small">${esc(message)}</p>` : res ? `<p class="route-sum"><b>${formatDuration(res.duration)}</b> · ${formatDistance(res.distance)}</p>
+      <p class="muted small route-note">${esc(notes[r.source])}</p>` : ''}
+    <button class="btn small ghost" data-route-act="ext" data-url="${esc(gmaps)}">↗ Turn-by-turn in Google Maps</button>`;
 }
 
 /** Show the map centred on the user (or on a given spot), following GPS until they pan. */
 function centreMap(target) {
   if (!map) return;
   map.resize();
-  if (target) {
+  if (target?.route) {
+    map.userMoved = true; // the route will be fitted on screen
+  } else if (!target && state.route?.result) {
+    map.fitPoints(state.route.result.coords, routePanelSpace());
+    map.userMoved = true;
+  } else if (target) {
     map.setView(target.center, target.zoom);
     map.userMoved = true; // looking at something specific: don't jump back to the user
   } else if (state.pos) {
@@ -438,9 +539,23 @@ async function downloadArea(lat, lon, label) {
     await db.saveRegion(region, places);
     await loadData();
     requestPersistentStorage();
-    status.textContent = places.length
-      ? `Saved ${places.length} places for offline use. ✅`
-      : 'Saved, but no places were found here. Try a bigger radius, or add places yourself with ＋.';
+    // Roads for offline routes. If this part fails the places are still saved.
+    status.textContent = `Saved ${places.length} places. Now saving roads for offline routes…`;
+    const roadRadius = Math.min(radius, MAX_ROAD_RADIUS);
+    let roadsNote = '';
+    try {
+      const graph = buildGraph(await fetchRoads(lat, lon, roadRadius, { signal: ctrl.signal }));
+      await db.put('graphs', { regionId: id, ...graph });
+      await db.put('regions', { ...region, roads: true, roadRadius });
+      if (graphCache?.id === id) graphCache = null;
+      await loadData();
+    } catch (err) {
+      if (ctrl.signal.aborted) throw err;
+      roadsNote = ' Roads could not be saved, so routes will need internet. Try ↻ later.';
+    }
+    status.textContent = (places.length
+      ? `Saved ${places.length} places${roadsNote ? '' : ' and roads'} for offline use. ✅`
+      : 'Saved, but no places were found here. Try a bigger radius, or add places yourself with ＋.') + roadsNote;
     toast(places.length ? `Saved ${places.length} places — works offline now` : 'No places found in this area');
     return true;
   } catch (err) {
@@ -580,7 +695,7 @@ async function renderRegions() {
   ul.innerHTML = state.regions.length
     ? [...state.regions].sort((a, b) => b.savedAt - a.savedAt).map((r) => `<li data-id="${esc(r.id)}">
         <div><div class="r-name">${esc(r.name)}</div>
-        <div class="muted small">${r.count} places · ${r.radius / 1000} km · saved ${timeAgo(r.savedAt)}${Date.now() - r.savedAt > staleMs ? ' · <b>refresh recommended</b>' : ''}</div></div>
+        <div class="muted small">${r.count} places · ${r.radius / 1000} km · ${r.roads ? 'offline routes ✓' : 'no offline routes (tap ↻)'} · saved ${timeAgo(r.savedAt)}${Date.now() - r.savedAt > staleMs ? ' · <b>refresh recommended</b>' : ''}</div></div>
         <div class="btn-row nowrap">
           <button class="btn small ghost" data-act="refresh" aria-label="Download ${esc(r.name)} again">↻</button>
           <button class="btn small danger" data-act="del">Delete</button>
@@ -771,6 +886,7 @@ function bindEvents() {
     const id = li.dataset.id;
     const actEl = e.target.closest('[data-act]');
     const act = actEl?.dataset.act;
+    if (act === 'route') { startRoute(state.places.find((x) => x.id === id)); return; }
     if (act === 'map') {
       const p = state.places.find((x) => x.id === id);
       showView('map', { center: [p.lat, p.lon], zoom: 18 });
@@ -849,6 +965,22 @@ function bindEvents() {
     if (!window.confirm('Remove saved map pictures? Your places are kept.')) return;
     await clearMapCache();
     renderRegions();
+  });
+
+  $('#routePanel').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.routeMode && state.route && b.dataset.routeMode !== state.route.mode) {
+      state.route.mode = b.dataset.routeMode;
+      state.route.result = null;
+      updateRoute(true);
+    }
+    if (b.dataset.routeAct === 'close') closeRoute();
+    if (b.dataset.routeAct === 'ext') openExternal(b.dataset.url);
+  });
+  $('#map').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-route]');
+    if (b) startRoute(state.places.find((x) => x.id === b.dataset.route));
   });
 
   $('#recenterBtn').addEventListener('click', () => {

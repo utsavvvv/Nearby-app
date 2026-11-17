@@ -17,6 +17,18 @@ const ELEMENTS = [
 
 test.use({ geolocation: HOME, permissions: ['geolocation'] });
 
+// A street grid around the test location (every ~200 m), for offline routes.
+const ROADS = (() => {
+  const els = [];
+  const rows = 21; const cols = 21;
+  const id = (r, c) => 1 + r * cols + c;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) els.push({ type: 'node', id: id(r, c), lat: 25.30 + r * 0.002, lon: 82.96 + c * 0.002 });
+  let w = 1;
+  for (let r = 0; r < rows; r++) els.push({ type: 'way', id: w++, nodes: Array.from({ length: cols }, (_, c) => id(r, c)), tags: { highway: 'residential' } });
+  for (let c = 0; c < cols; c++) els.push({ type: 'way', id: w++, nodes: Array.from({ length: rows }, (_, r) => id(r, c)), tags: { highway: 'residential' } });
+  return els;
+})();
+
 // A tiny stand-in for the OpenFreeMap style, tile index and tiles.
 const MAP_STYLE = {
   version: 8,
@@ -43,7 +55,10 @@ async function mockMap(context) {
 
 test.beforeEach(async ({ context }) => {
   // Never hit real servers in tests.
-  await context.route(/\/api\/interpreter$/, (r) => r.fulfill({ json: { elements: ELEMENTS } }));
+  await context.route(/\/api\/interpreter$/, (r) => r.fulfill({ json: { elements: decodeURIComponent(r.request().postData() || '').includes('"highway"') ? ROADS : ELEMENTS } }));
+  await context.route(/routing\.openstreetmap\.de/, (r) => r.fulfill({ json: {
+    code: 'Ok', routes: [{ distance: 999, duration: 600, geometry: { type: 'LineString', coordinates: [[82.9739, 25.3176], [82.98, 25.32], [82.99, 25.33]] } }],
+  } }));
   await context.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: { address: { suburb: 'Godowlia', country_code: 'in' } } }));
   await context.route(/nominatim\.openstreetmap\.org\/search/, (r) => {
     const params = new URL(r.request().url()).searchParams;
@@ -64,10 +79,28 @@ test.beforeEach(async ({ context }) => {
   await context.route(/^https:\/\/(www\.booking\.com|play\.google\.com)\//, (r) => r.fulfill({ contentType: 'text/html', body: '<h1>partner</h1>' }));
 });
 
+/** Count pixels of the route's blue (#4285f4) in a screenshot of the map. */
+async function routeBluePixels(page) {
+  const png = (await page.locator('#map').screenshot()).toString('base64');
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 66) < 20 && Math.abs(d[i + 1] - 133) < 20 && Math.abs(d[i + 2] - 244) < 20) n++;
+    return n;
+  }, png);
+}
+
 async function saveArea(page) {
   await page.goto('/');
   await page.getByRole('button', { name: /Save area around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places and roads');
   await page.getByRole('button', { name: 'Nearby' }).click();
 }
 
@@ -170,7 +203,7 @@ test('town search offers to save that town', async ({ page }) => {
   await page.getByRole('button', { name: 'Find' }).click();
   await expect(page.locator('#townResult')).not.toContainText('Looking for');
   await page.locator('.town-list').getByRole('button', { name: /Save/ }).first().click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places and roads');
   await expect(page.locator('#regions')).toContainText('Varanasi');
 });
 
@@ -237,7 +270,7 @@ test('free version limits areas and radius, Pro dialog explains', async ({ page,
 
   // Two areas are free; the third asks for Pro.
   await page.getByRole('button', { name: /Around me/ }).click();
-  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places');
+  await expect(page.locator('#dlStatus')).toContainText('Saved 8 places and roads');
   await context.setGeolocation({ latitude: 25.4, longitude: 82.9 });
   await page.waitForTimeout(300);
   await page.getByRole('button', { name: /Around me/ }).click();
@@ -421,4 +454,65 @@ test('light, dark and system appearance', async ({ page }) => {
   // "Light" wins even when the phone is in dark mode.
   await page.getByRole('radio', { name: /Light/ }).click();
   expect(await bg()).toBe(lightBg);
+});
+
+test('route to a place: shortest path on saved roads, offline', async ({ page, context }) => {
+  await saveArea(page);
+  await page.getByRole('button', { name: 'Offline areas' }).click();
+  await expect(page.locator('#regions')).toContainText('offline routes ✓');
+  await page.getByRole('button', { name: 'Nearby' }).click();
+
+  await context.setOffline(true);
+  await page.locator('.place-main', { hasText: 'Hotel Ganges View' }).click();
+  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+
+  const panel = page.locator('#routePanel');
+  await expect(page.locator('#view-map')).toBeVisible();
+  await expect(panel).toContainText('Hotel Ganges View');
+  await expect(panel).toContainText('Shortest route on saved roads · works offline');
+  // Along the grid (1.4 km north + 1.6 km east) it is longer than the straight line (~2.1 km).
+  await expect(panel.locator('.route-sum')).toContainText(/3\.0 km/);
+  const walk = await panel.locator('.route-sum').textContent();
+  // The blue route line is really drawn on the map.
+  await expect.poll(() => routeBluePixels(page), { timeout: 10000 }).toBeGreaterThan(500);
+
+  // Driving: same roads, shorter time.
+  await panel.getByRole('radio', { name: /Drive/ }).click();
+  await expect(panel.getByRole('radio', { name: /Drive/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(panel.locator('.route-sum')).not.toHaveText(walk);
+
+  await panel.getByRole('button', { name: 'Close route' }).click();
+  await expect(panel).toBeHidden();
+  await expect.poll(() => routeBluePixels(page)).toBeLessThan(50);
+});
+
+test('route falls back to the online service, then a straight line', async ({ page, context }) => {
+  await page.goto('/');
+  // An area saved before offline routes existed: places only, no roads.
+  await page.evaluate(async () => {
+    const db = await new Promise((res) => { const q = indexedDB.open('nearby-app', 2); q.onsuccess = () => res(q.result); });
+    const tx = db.transaction(['regions', 'places'], 'readwrite');
+    tx.objectStore('regions').put({ id: 'old', lat: 25.3176, lon: 82.9739, radius: 5000, name: 'Old area', count: 1, savedAt: Date.now() });
+    tx.objectStore('places').put({ id: 'osm:node/1', source: 'osm', regionId: 'old', lat: 25.33, lon: 82.99, cat: 'pan', name: 'Far Pan Shop' });
+    await new Promise((res) => { tx.oncomplete = res; });
+  });
+  await page.reload();
+  await page.locator('.place-main').first().click();
+  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await expect(page.locator('#routePanel')).toContainText('Route from the online routing service');
+  await expect(page.locator('#routePanel .route-sum')).toContainText('10 min');
+
+  await page.getByRole('button', { name: 'Nearby' }).click();
+  await context.setOffline(true);
+  await page.locator('.place.open').getByRole('button', { name: /Route/ }).click();
+  await expect(page.locator('#routePanel')).toContainText('Save this area again (↻) while online');
+});
+
+test('route button in a map marker popup', async ({ page }) => {
+  await saveArea(page);
+  await page.getByRole('button', { name: 'Map' }).click();
+  await page.locator('.pin-btn[aria-label="Raju Pan Bhandar"]').click();
+  await page.locator('.maplibregl-popup').getByRole('button', { name: /Route/ }).click();
+  await expect(page.locator('#routePanel')).toContainText('Raju Pan Bhandar');
+  await expect(page.locator('#routePanel')).toContainText('works offline');
 });

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- 🧭 Route: tap Route on any place (list or map marker) to see a blue route line from your
+  location, with distance and time, Walk / Drive, and a Google Maps hand-off for turn-by-turn.
+- Offline shortest routes: saving an area now also saves its roads (up to 10 km), and the
+  shortest path is calculated on the phone (A*). Walking uses footpaths; driving respects one-way streets.
+- Areas without saved roads use the online routing service, or a straight line when offline.
+- The route updates as you walk.
+
 ## 1.3.1
 
 - Typing a kind of place ("school", "ATM", "chemist") in the search box now finds those

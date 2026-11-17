@@ -22,7 +22,8 @@ There's no server, no account and no tracking. Everything is stored on the phone
 | Add your own places (e.g. an unmapped pan shop) | No |
 | Export / import places as a file (backup, share with friends) | No |
 | Street map with markers (OpenFreeMap) | Areas you've viewed online are cached for offline use |
-| Directions | Hands off to the phone's maps app |
+| 🧭 Route: blue line to any place, Walk / Drive, shortest path on saved roads | No (areas saved with roads) |
+| Turn-by-turn voice directions | Hands off to Google Maps |
 | Light / Dark / System appearance | No |
 | App updates | Web: shows "A new version is ready" → *Update* |
 | Hotel "Check prices & book" links (Booking.com affiliate) | Yes |
@@ -58,6 +59,8 @@ src/
     overpass.js     downloads places (timeouts, fallback servers, cancel)
     db.js           IndexedDB storage
     hours.js        opening_hours parser ("Open now")
+    graph.js        offline road graph + A* shortest path
+    routing.js      online routing fallback (OSRM-compatible) and straight-line fallback
     map.js          street map (MapLibre + OpenFreeMap) with offline caching
     model.js        validation of imported data
     theme.js        light / dark / system appearance (theme-init.js applies it before first paint)

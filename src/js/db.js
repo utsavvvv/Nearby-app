@@ -1,7 +1,7 @@
 // IndexedDB storage for downloaded areas and places, so everything works offline.
 
 const DB_NAME = 'nearby-app';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise;
 
 function open() {
@@ -16,6 +16,10 @@ function open() {
       }
       if (!db.objectStoreNames.contains('regions')) {
         db.createObjectStore('regions', { keyPath: 'id' });
+      }
+      // v2: road graphs for offline routes, one per saved area.
+      if (!db.objectStoreNames.contains('graphs')) {
+        db.createObjectStore('graphs', { keyPath: 'regionId' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -78,5 +82,11 @@ export async function deleteRegion(regionId) {
   const keys = await reqP(placeStore.index('regionId').getAllKeys(regionId));
   keys.forEach((k) => placeStore.delete(k));
   tx.objectStore('regions').delete(regionId);
-  return done(tx);
+  await done(tx);
+  await remove('graphs', regionId);
+}
+
+export async function getOne(store, key) {
+  const db = await open();
+  return reqP(db.transaction(store).objectStore(store).get(key));
 }

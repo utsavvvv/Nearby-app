@@ -286,3 +286,20 @@ body.doc { display: block; padding: 16px; }
 .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 14px; background: var(--accent-soft); }
 .segmented button { border: 0; border-radius: 10px; padding: .55rem .4rem; background: none; cursor: pointer; font-weight: 600; color: var(--text); }
 .segmented button[aria-checked="true"] { background: var(--surface); box-shadow: var(--shadow); color: var(--accent); }
+
+/* Route panel (bottom sheet on the map) */
+.route-panel {
+  position: absolute; left: 10px; right: 10px; bottom: calc(var(--tabs-h) + 10px); z-index: 600;
+  background: var(--surface); color: var(--text); border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  padding: .75rem .85rem .85rem; display: grid; gap: .5rem;
+}
+.route-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.route-dest { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-close { background: var(--accent-soft); color: var(--text); width: 32px; height: 32px; font-size: .95rem; }
+.route-sum { margin: 0; font-size: 1.05rem; }
+.route-sum b { color: #1a73e8; font-size: 1.25rem; }
+.route-note { margin: 0; }
+.popup-route { margin-top: .4rem; }
+/* Hide the "add place" crosshair and button clutter while routing */
+#view-map:has(.route-panel:not([hidden])) .crosshair { display: none; }
+body:has(#view-map.active #routePanel:not([hidden])) .fab { display: none; }
